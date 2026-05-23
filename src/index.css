@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Regras customizadas para impressão */
+@media print {
+  /* Oculta tudo que não for a área do recibo */
+  body {
+    background-color: white !important;
+    color: black !important;
+    font-size: 11px !important;
+  }
+  
+  /* Oculta painel administrativo, botões, cabeçalho */
+  .no-print, 
+  header, 
+  nav, 
+  aside, 
+  button, 
+  .admin-dashboard,
+  .toast,
+  .modal-overlay:not(.print-modal-overlay) {
+    display: none !important;
+  }
+
+  /* Exibe somente o container de impressão */
+  .print-area {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: transparent !important;
+  }
+
+  /* Garante cores reais de fundo durante impressão */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

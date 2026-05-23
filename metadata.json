@@ -1,0 +1,6 @@
+{
+  "name": "Recibo e Orçamento Online",
+  "description": "Sistema completo para geração de recibos e orçamentos, conversão, cadastro de clientes, envio por WhatsApp e e-mail, upload de logotipo e relatórios financeiros automáticos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
