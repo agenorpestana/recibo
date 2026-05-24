@@ -10,14 +10,15 @@ import { ReceiptsTab } from './components/ReceiptsTab';
 import { ClientsTab } from './components/ClientsTab';
 import { ReportsTab } from './components/ReportsTab';
 import { CompanySettingsTab } from './components/CompanySettingsTab';
+import { UsersTab } from './components/UsersTab';
 import { 
-  Receipt, Users, BarChart3, Settings, LogOut, CheckSquare, ShieldAlert, Sparkles, ServerCrash
+  Receipt, Users, BarChart3, Settings, LogOut, CheckSquare, ShieldAlert, Sparkles, ServerCrash, ShieldCheck
 } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'documents' | 'clients' | 'reports' | 'settings'>('documents');
+  const [activeTab, setActiveTab] = useState<'documents' | 'clients' | 'reports' | 'settings' | 'users'>('documents');
   
   // Estados compartilhados e atualizados dinamicamente pelo painel central
   const [clients, setClients] = useState<Client[]>([]);
@@ -83,6 +84,27 @@ export default function App() {
     }
   }, [user]);
 
+  // Controla se a aba é visível para o perfil atual
+  const isTabAuthorized = (tab: 'documents' | 'clients' | 'reports' | 'settings' | 'users') => {
+    if (user?.role === 'admin') return true;
+    return user?.permissions?.includes(tab) || false;
+  };
+
+  // Redireciona o operador para a primeira aba disponível caso tente acessar uma sem permissão
+  useEffect(() => {
+    if (user) {
+      if (!isTabAuthorized(activeTab)) {
+        const orderOfTabs: ('documents' | 'clients' | 'reports' | 'settings' | 'users')[] = [
+          'documents', 'clients', 'reports', 'settings', 'users'
+        ];
+        const firstAllowed = orderOfTabs.find(t => isTabAuthorized(t));
+        if (firstAllowed) {
+          setActiveTab(firstAllowed);
+        }
+      }
+    }
+  }, [user, activeTab]);
+
   // Se o usuário não estiver autenticado, exibe a tela de login seguro
   if (!user) {
     return <Login onLoginSuccess={handleLoginSuccess} />;
@@ -108,53 +130,75 @@ export default function App() {
 
             {/* Abas Principais de Navegação Horizontal */}
             <nav className="hidden md:flex space-x-1 items-end mt-2">
-              <button
-                onClick={() => setActiveTab('documents')}
-                className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
-                  activeTab === 'documents'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <Receipt className="h-4 w-4" />
-                Recibos & Orçamentos
-              </button>
+              {isTabAuthorized('documents') && (
+                <button
+                  onClick={() => setActiveTab('documents')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'documents'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Receipt className="h-4 w-4" />
+                  Recibos & Orçamentos
+                </button>
+              )}
 
-              <button
-                onClick={() => setActiveTab('clients')}
-                className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
-                  activeTab === 'clients'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <Users className="h-4 w-4" />
-                Cadastro de Clientes
-              </button>
+              {isTabAuthorized('clients') && (
+                <button
+                  onClick={() => setActiveTab('clients')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'clients'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Users className="h-4 w-4" />
+                  Cadastro de Clientes
+                </button>
+              )}
 
-              <button
-                onClick={() => setActiveTab('reports')}
-                className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
-                  activeTab === 'reports'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <BarChart3 className="h-4 w-4" />
-                Relatório Financeiro
-              </button>
+              {isTabAuthorized('reports') && (
+                <button
+                  onClick={() => setActiveTab('reports')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'reports'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  Relatório Financeiro
+                </button>
+              )}
 
-              <button
-                onClick={() => setActiveTab('settings')}
-                className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
-                  activeTab === 'settings'
-                    ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                <Settings className="h-4 w-4" />
-                Configurações Gerais
-              </button>
+              {isTabAuthorized('settings') && (
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'settings'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Settings className="h-4 w-4" />
+                  Configurações Gerais
+                </button>
+              )}
+
+              {isTabAuthorized('users') && (
+                <button
+                  onClick={() => setActiveTab('users')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'users'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  Controle de Acessos
+                </button>
+              )}
             </nav>
 
             {/* Informações do Superusuário Logado e Logout */}
@@ -164,7 +208,7 @@ export default function App() {
                   <span className="font-bold text-xs text-gray-900">{user.name}</span>
                   <span className="px-1.5 py-0.5 rounded bg-blue-50 border border-blue-200 text-[9px] text-blue-800 font-extrabold flex items-center gap-1">
                     <Sparkles className="h-2.5 w-2.5" />
-                    Admin
+                    {user.role === 'admin' ? 'Admin' : 'Operador'}
                   </span>
                 </div>
                 <span className="text-[10px] text-gray-400 font-mono block mt-0.5">{user.email}</span>
@@ -187,49 +231,70 @@ export default function App() {
 
       {/* Menu Sanduíche Simplificado / Alternador de Abas para Celular */}
       <div className="no-print bg-white border-b border-gray-200 md:hidden flex justify-around p-2 sticky top-[64px] z-30 shadow-sm">
-        <button
-          onClick={() => setActiveTab('documents')}
-          title="Comprovantes"
-          className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
-            activeTab === 'documents' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
-          }`}
-        >
-          <Receipt className="h-5 w-5" />
-          Recibos & Orçamentos
-        </button>
+        {isTabAuthorized('documents') && (
+          <button
+            onClick={() => setActiveTab('documents')}
+            title="Comprovantes"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'documents' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <Receipt className="h-5 w-5" />
+            Recibos & Orçamentos
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('clients')}
-          title="Clientes"
-          className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
-            activeTab === 'clients' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
-          }`}
-        >
-          <Users className="h-5 w-5" />
-          Clientes
-        </button>
+        {isTabAuthorized('clients') && (
+          <button
+            onClick={() => setActiveTab('clients')}
+            title="Clientes"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'clients' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <Users className="h-5 w-5" />
+            Clientes
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('reports')}
-          title="Relatório"
-          className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
-            activeTab === 'reports' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
-          }`}
-        >
-          <BarChart3 className="h-5 w-5" />
-          Relatório
-        </button>
+        {isTabAuthorized('reports') && (
+          <button
+            onClick={() => setActiveTab('reports')}
+            title="Relatório"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'reports' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <BarChart3 className="h-5 w-5" />
+            Relatório
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('settings')}
-          title="Empresa"
-          className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
-            activeTab === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
-          }`}
-        >
-          <Settings className="h-5 w-5" />
-          Empresa
-        </button>
+        {isTabAuthorized('settings') && (
+          <button
+            onClick={() => setActiveTab('settings')}
+            title="Empresa"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <Settings className="h-5 w-5" />
+            Empresa
+          </button>
+        )}
+
+        {isTabAuthorized('users') && (
+          <button
+            onClick={() => setActiveTab('users')}
+            title="Usuários"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'users' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <ShieldCheck className="h-5 w-5" />
+            Usuários
+          </button>
+        )}
       </div>
 
       {/* Corpo Inicial de Conteúdo Ativo */}
@@ -244,7 +309,7 @@ export default function App() {
           </div>
         ) : (
           <div className="space-y-6">
-            {activeTab === 'documents' && settings && (
+            {activeTab === 'documents' && isTabAuthorized('documents') && settings && (
               <ReceiptsTab 
                 settings={settings} 
                 clients={clients} 
@@ -252,19 +317,23 @@ export default function App() {
               />
             )}
 
-            {activeTab === 'clients' && (
+            {activeTab === 'clients' && isTabAuthorized('clients') && (
               <ClientsTab onRefreshClientsList={refreshSharedClients} />
             )}
 
-            {activeTab === 'reports' && (
+            {activeTab === 'reports' && isTabAuthorized('reports') && (
               <ReportsTab key={statsTrigger} />
             )}
 
-            {activeTab === 'settings' && settings && (
+            {activeTab === 'settings' && isTabAuthorized('settings') && settings && (
               <CompanySettingsTab 
                 settings={settings} 
                 onSettingsUpdated={(updated) => setSettings(updated)}
               />
+            )}
+
+            {activeTab === 'users' && isTabAuthorized('users') && (
+              <UsersTab currentUser={user} />
             )}
           </div>
         )}

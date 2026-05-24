@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `name` VARCHAR(100) NOT NULL,
   `role` VARCHAR(20) NOT NULL DEFAULT 'user', -- 'admin' ou 'user'
+  `permissions` TEXT DEFAULT NULL, -- Array JSON com as abas permitidas
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

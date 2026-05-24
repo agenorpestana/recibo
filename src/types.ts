@@ -11,6 +11,7 @@ export interface User {
   email: string;
   name: string;
   role: 'admin' | 'user';
+  permissions?: string[]; // Ex: ['documents', 'clients', 'reports', 'settings', 'users']
 }
 
 export interface Client {

@@ -73,6 +73,24 @@ class Database {
 
   constructor() {
     this.loadJSON();
+    this.runMigrations().catch(e => {
+      console.error('[Database] Falha silenciosa ao executar migrações:', e);
+    });
+  }
+
+  private async runMigrations() {
+    if (!pool) return;
+    try {
+      // Executa consulta para verificar se a coluna permissions existe ou simplesmente executa alteração em bloco trycatch
+      try {
+        await pool.query('ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL');
+        console.log('[Database Migration] Coluna "permissions" inserida/validada na tabela "users" com sucesso.');
+      } catch (err) {
+        // Ignora se a coluna já existia (erro comum em MySQL/MariaDB ao tentar duplicar coluna)
+      }
+    } catch (e) {
+      console.error('[Database Migration] Erro inesperado ao migrar tabela:', e);
+    }
   }
 
   private loadJSON() {
@@ -203,60 +221,257 @@ class Database {
 
   async getUsers(): Promise<User[]> {
     if (!pool) {
-      return this.schema.users;
+      return this.schema.users.map(u => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        permissions: u.permissions || []
+      }));
     }
     const [rows]: any = await pool.query('SELECT * FROM users');
-    return rows.map((r: any) => ({
-      id: r.id,
-      email: r.email,
-      name: r.name,
-      role: r.role
-    }));
+    return rows.map((r: any) => {
+      let permissions: string[] = [];
+      if (r.permissions) {
+        try {
+          permissions = JSON.parse(r.permissions);
+        } catch (e) {
+          permissions = r.permissions.split(',').filter(Boolean);
+        }
+      }
+      return {
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        role: r.role,
+        permissions
+      };
+    });
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     if (!pool) {
-      return this.schema.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      const u = this.schema.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (u) {
+        return { ...u, permissions: u.permissions || [] };
+      }
+      return undefined;
     }
     const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(email) = ?', [email.toLowerCase()]);
     if (rows.length === 0) {
-      // Criação automática do administrador se for o suporte padrão
       if (email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+        const pass = '$2b$10$Un1tyAut0mat1onSenha200616HashPlaceholderRealMatchesClientSide';
         await pool.query(
-          'INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
-          ['suporte@unityautomacoes.com.br', '$2b$10$Un1tyAut0mat1onSenha200616HashPlaceholderRealMatchesClientSide', 'Super Usuário Unity', 'admin']
+          'INSERT INTO users (email, password_hash, name, role, permissions) VALUES (?, ?, ?, ?, ?)',
+          ['suporte@unityautomacoes.com.br', pass, 'Super Usuário Unity', 'admin', '[]']
         );
         const [newRows]: any = await pool.query('SELECT * FROM users WHERE LOWER(email) = ?', ['suporte@unityautomacoes.com.br']);
         return {
           id: newRows[0].id,
           email: newRows[0].email,
           name: newRows[0].name,
-          role: newRows[0].role
+          role: newRows[0].role,
+          permissions: []
         };
       }
       return undefined;
+    }
+    let permissions: string[] = [];
+    if (rows[0].permissions) {
+      try {
+        permissions = JSON.parse(rows[0].permissions);
+      } catch (e) {
+        permissions = rows[0].permissions.split(',').filter(Boolean);
+      }
     }
     return {
       id: rows[0].id,
       email: rows[0].email,
       name: rows[0].name,
-      role: rows[0].role
+      role: rows[0].role,
+      permissions
     };
   }
 
-  async createUser(user: Omit<User, 'id'>): Promise<User> {
+  async getUserWithPasswordByEmail(email: string): Promise<(User & { password_hash?: string }) | undefined> {
+    if (!pool) {
+      const u = this.schema.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (u) {
+        const anyU = u as any;
+        return {
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          role: u.role,
+          permissions: u.permissions || [],
+          password_hash: anyU.password || anyU.password_hash || '123456'
+        };
+      }
+      return undefined;
+    }
+    const [rows]: any = await pool.query('SELECT * FROM users WHERE LOWER(email) = ?', [email.toLowerCase()]);
+    if (rows.length === 0) {
+      if (email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+        const user = await this.getUserByEmail(email);
+        if (user) {
+          return {
+            ...user,
+            password_hash: '$2b$10$Un1tyAut0mat1onSenha200616HashPlaceholderRealMatchesClientSide'
+          };
+        }
+      }
+      return undefined;
+    }
+    let permissions: string[] = [];
+    if (rows[0].permissions) {
+      try {
+        permissions = JSON.parse(rows[0].permissions);
+      } catch (e) {
+        permissions = rows[0].permissions.split(',').filter(Boolean);
+      }
+    }
+    return {
+      id: rows[0].id,
+      email: rows[0].email,
+      name: rows[0].name,
+      role: rows[0].role,
+      permissions,
+      password_hash: rows[0].password_hash
+    };
+  }
+
+  async createUser(user: Omit<User, 'id'> & { password?: string }): Promise<User> {
+    const permissionsStr = JSON.stringify(user.permissions || []);
+    const passwordToSave = user.password || '123456';
+
     if (!pool) {
       const id = Date.now() + Math.floor(Math.random() * 100);
-      const newUser = { ...user, id };
-      this.schema.users.push(newUser);
+      const newUser = {
+        id,
+        email: user.email,
+        name: user.name,
+        role: user.role || 'user',
+        permissions: user.permissions || [],
+        password: passwordToSave
+      };
+      this.schema.users.push(newUser as any);
       this.saveJSON();
-      return newUser;
+      return {
+        id,
+        email: user.email,
+        name: user.name,
+        role: user.role || 'user',
+        permissions: user.permissions || []
+      };
     }
+
     const [result]: any = await pool.query(
-      'INSERT INTO users (email, password_hash, name, role) VALUES (?, ?, ?, ?)',
-      [user.email, '$2b$10$Un1tyAut0mat1onSenha200616HashPlaceholderRealMatchesClientSide', user.name, user.role || 'user']
+      'INSERT INTO users (email, password_hash, name, role, permissions) VALUES (?, ?, ?, ?, ?)',
+      [user.email, passwordToSave, user.name, user.role || 'user', permissionsStr]
     );
-    return { id: result.insertId, ...user };
+
+    return {
+      id: result.insertId,
+      email: user.email,
+      name: user.name,
+      role: user.role || 'user',
+      permissions: user.permissions || []
+    };
+  }
+
+  async updateUser(id: string | number, updated: Partial<User & { password?: string }>): Promise<User> {
+    if (!pool) {
+      const index = this.schema.users.findIndex(u => String(u.id) === String(id));
+      if (index === -1) throw new Error("Usuário não encontrado.");
+      
+      const existing = this.schema.users[index] as any;
+      
+      let newEmail = updated.email !== undefined ? updated.email : existing.email;
+      let newRole = updated.role !== undefined ? updated.role : existing.role;
+      if (existing.email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+        newEmail = 'suporte@unityautomacoes.com.br';
+        newRole = 'admin';
+      }
+
+      this.schema.users[index] = {
+        ...existing,
+        name: updated.name !== undefined ? updated.name : existing.name,
+        email: newEmail,
+        role: newRole,
+        permissions: updated.permissions !== undefined ? updated.permissions : existing.permissions || [],
+        password: updated.password !== undefined ? updated.password : existing.password
+      };
+      this.saveJSON();
+      return {
+        id: existing.id,
+        name: this.schema.users[index].name,
+        email: this.schema.users[index].email,
+        role: this.schema.users[index].role,
+        permissions: this.schema.users[index].permissions
+      };
+    }
+
+    const [rows]: any = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    if (rows.length === 0) throw new Error("Usuário não encontrado.");
+    const cur = rows[0];
+
+    let newEmail = updated.email !== undefined ? updated.email : cur.email;
+    let newRole = updated.role !== undefined ? updated.role : cur.role;
+    if (cur.email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+      newEmail = 'suporte@unityautomacoes.com.br';
+      newRole = 'admin';
+    }
+
+    const merged = {
+      name: updated.name !== undefined ? updated.name : cur.name,
+      email: newEmail,
+      role: newRole,
+      password_hash: updated.password !== undefined ? updated.password : cur.password_hash,
+      permissions: updated.permissions !== undefined ? JSON.stringify(updated.permissions) : cur.permissions || '[]'
+    };
+
+    await pool.query(
+      'UPDATE users SET name=?, email=?, role=?, password_hash=?, permissions=? WHERE id=?',
+      [merged.name, merged.email, merged.role, merged.password_hash, merged.permissions, id]
+    );
+
+    let parsedPermissions: string[] = [];
+    try {
+      parsedPermissions = JSON.parse(merged.permissions);
+    } catch (e) {
+      parsedPermissions = merged.permissions.split(',').filter(Boolean);
+    }
+
+    return {
+      id,
+      name: merged.name,
+      email: merged.email,
+      role: merged.role,
+      permissions: parsedPermissions
+    };
+  }
+
+  async deleteUser(id: string | number): Promise<boolean> {
+    if (!pool) {
+      const index = this.schema.users.findIndex(u => String(u.id) === String(id));
+      if (index === -1) return false;
+      const user = this.schema.users[index];
+      if (user.email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+        throw new Error("O super usuário administrador não pode ser excluído.");
+      }
+      this.schema.users.splice(index, 1);
+      this.saveJSON();
+      return true;
+    }
+
+    const [rows]: any = await pool.query('SELECT * FROM users WHERE id = ?', [id]);
+    if (rows.length === 0) return false;
+    if (rows[0].email.toLowerCase() === 'suporte@unityautomacoes.com.br') {
+      throw new Error("O super usuário administrador não pode ser excluído.");
+    }
+
+    await pool.query('DELETE FROM users WHERE id = ?', [id]);
+    return true;
   }
 
   // --- CRUD CLIENTES ---
