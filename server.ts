@@ -155,7 +155,8 @@ async function startServer() {
       payment_method,
       issue_date,
       location_date,
-      notes
+      notes,
+      company_info
     } = req.body;
 
     if (!type || !client_name || !items || !Array.isArray(items) || items.length === 0) {
@@ -178,7 +179,8 @@ async function startServer() {
         payment_method: payment_method || 'PIX',
         issue_date: issue_date || new Date().toISOString().split('T')[0],
         location_date: location_date || '',
-        notes: notes || ''
+        notes: notes || '',
+        company_info: company_info || null
       });
       res.status(201).json(doc);
     } catch (e: any) {
