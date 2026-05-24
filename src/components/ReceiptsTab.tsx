@@ -89,6 +89,22 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     fetchCompanies();
   }, [showFormModal]);
 
+  const hasCompanySelected = !!formData.company_info;
+  const companiesLength = companies.length;
+
+  useEffect(() => {
+    if (showFormModal && !hasCompanySelected && companiesLength > 0) {
+      const defaultCompany = companies[0];
+      const activeAddress = defaultCompany.address;
+      setFormData(prev => ({
+        ...prev,
+        company_info: defaultCompany,
+        location_date: `${activeAddress.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+        notes: prev.type === 'RECIBO' ? defaultCompany.notes_recibo_default : defaultCompany.notes_orcamento_default
+      }));
+    }
+  }, [companiesLength, showFormModal, hasCompanySelected]);
+
   // Monitora alterações de seleção de cliente para preenchimento automático inteligente
   const handleClientSelect = (clientIdVal: string | number) => {
     if (!clientIdVal) {

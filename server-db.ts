@@ -83,6 +83,27 @@ class Database {
   private async runMigrations() {
     if (!pool) return;
     try {
+      // Cria a tabela de configurações de multiplas empresas se ela não existir
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS company_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            company_name VARCHAR(150) NOT NULL DEFAULT 'UNITY AUTOMACOES LTDA.',
+            cnpj VARCHAR(25) DEFAULT '44.285.891/0001-45',
+            ie VARCHAR(25) DEFAULT '187.652.146 ME',
+            address VARCHAR(255) DEFAULT 'AVENIDA ACM, 548-B, CENTRO, ITAMARAJU-BA',
+            phone VARCHAR(25) DEFAULT '(73)3191-1230',
+            email VARCHAR(150) DEFAULT 'contato@unityautomacoes.com.br',
+            logo_base64 LONGTEXT DEFAULT NULL,
+            notes_recibo_default TEXT DEFAULT NULL,
+            notes_orcamento_default TEXT DEFAULT NULL
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('[Database Migration] Tabela "company_settings" criada ou validada com sucesso.');
+      } catch (err) {
+        console.error('[Database Migration] Erro ao criar ou validar tabela "company_settings":', err);
+      }
+
       // Executa consulta para verificar se a coluna permissions existe ou simplesmente executa alteração em bloco trycatch
       try {
         await pool.query('ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL');
@@ -189,32 +210,32 @@ class Database {
       const [rows]: any = await pool.query('SELECT id FROM company_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO company_settings (company_name, cnpj, ie, address, phone, email, logo_base64, notes_recibo_default, notes_orcamento_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO company_settings (id, company_name, cnpj, ie, address, phone, email, logo_base64, notes_recibo_default, notes_orcamento_default) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
-            settings.company_name,
-            settings.cnpj,
-            settings.ie,
-            settings.address,
-            settings.phone,
-            settings.email,
-            settings.logo_base64,
-            settings.notes_recibo_default,
-            settings.notes_orcamento_default
+            settings.company_name || '',
+            settings.cnpj || '',
+            settings.ie || '',
+            settings.address || '',
+            settings.phone || '',
+            settings.email || '',
+            settings.logo_base64 !== undefined ? settings.logo_base64 : null,
+            settings.notes_recibo_default || '',
+            settings.notes_orcamento_default || ''
           ]
         );
       } else {
         await pool.query(
           'UPDATE company_settings SET company_name=?, cnpj=?, ie=?, address=?, phone=?, email=?, logo_base64=?, notes_recibo_default=?, notes_orcamento_default=? WHERE id=?',
           [
-            settings.company_name,
-            settings.cnpj,
-            settings.ie,
-            settings.address,
-            settings.phone,
-            settings.email,
-            settings.logo_base64,
-            settings.notes_recibo_default,
-            settings.notes_orcamento_default,
+            settings.company_name || '',
+            settings.cnpj || '',
+            settings.ie || '',
+            settings.address || '',
+            settings.phone || '',
+            settings.email || '',
+            settings.logo_base64 !== undefined ? settings.logo_base64 : null,
+            settings.notes_recibo_default || '',
+            settings.notes_orcamento_default || '',
             rows[0].id
           ]
         );
@@ -239,7 +260,7 @@ class Database {
       const [rows]: any = await pool.query('SELECT * FROM company_settings ORDER BY id ASC');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO company_settings (company_name, cnpj, ie, address, phone, email, notes_recibo_default, notes_orcamento_default, logo_base64) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)',
+          'INSERT INTO company_settings (id, company_name, cnpj, ie, address, phone, email, notes_recibo_default, notes_orcamento_default, logo_base64) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, NULL)',
           [
             defaultSettings.company_name,
             defaultSettings.cnpj,
@@ -276,15 +297,15 @@ class Database {
       const [res]: any = await pool.query(
         'INSERT INTO company_settings (company_name, cnpj, ie, address, phone, email, logo_base64, notes_recibo_default, notes_orcamento_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
-          settings.company_name,
-          settings.cnpj,
-          settings.ie,
-          settings.address,
-          settings.phone,
-          settings.email,
-          settings.logo_base64,
-          settings.notes_recibo_default,
-          settings.notes_orcamento_default
+          settings.company_name || '',
+          settings.cnpj || '',
+          settings.ie || '',
+          settings.address || '',
+          settings.phone || '',
+          settings.email || '',
+          settings.logo_base64 !== undefined ? settings.logo_base64 : null,
+          settings.notes_recibo_default || '',
+          settings.notes_orcamento_default || ''
         ]
       );
       return { id: res.insertId, ...settings };
@@ -315,15 +336,15 @@ class Database {
       await pool.query(
         'UPDATE company_settings SET company_name=?, cnpj=?, ie=?, address=?, phone=?, email=?, logo_base64=?, notes_recibo_default=?, notes_orcamento_default=? WHERE id=?',
         [
-          settings.company_name,
-          settings.cnpj,
-          settings.ie,
-          settings.address,
-          settings.phone,
-          settings.email,
-          settings.logo_base64,
-          settings.notes_recibo_default,
-          settings.notes_orcamento_default,
+          settings.company_name || '',
+          settings.cnpj || '',
+          settings.ie || '',
+          settings.address || '',
+          settings.phone || '',
+          settings.email || '',
+          settings.logo_base64 !== undefined ? settings.logo_base64 : null,
+          settings.notes_recibo_default || '',
+          settings.notes_orcamento_default || '',
           numId
         ]
       );
@@ -890,6 +911,7 @@ class Database {
       location_date: doc.location_date || '',
       notes: doc.notes || '',
       convert_from_id: doc.convert_from_id || null,
+      company_info: doc.company_info || null,
       items: processedItems.map((item, index) => ({ id: index + 1, ...item }))
     };
   }
@@ -1046,6 +1068,8 @@ class Database {
         throw new Error("Este documento já é um Recibo.");
       }
 
+      const activeCompany = budget.company_info || this.schema.settings;
+
       const receiptData: Omit<Document, 'id' | 'number'> = {
         type: 'RECIBO',
         client_id: budget.client_id,
@@ -1065,8 +1089,9 @@ class Database {
         status: 'PAGO',
         payment_method: budget.payment_method || 'PIX',
         issue_date: new Date().toISOString().split('T')[0],
-        location_date: `${this.schema.settings.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
-        notes: this.schema.settings.notes_recibo_default,
+        location_date: `${activeCompany.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+        notes: activeCompany.notes_recibo_default,
+        company_info: budget.company_info,
         convert_from_id: budget.id
       };
 
@@ -1082,7 +1107,7 @@ class Database {
     if (!budget) throw new Error("Orçamento não encontrado.");
     if (budget.type !== 'ORCAMENTO') throw new Error("Este documento já é um Recibo.");
 
-    const settings = await this.getSettings();
+    const activeCompany = budget.company_info || (await this.getSettings());
 
     const receiptData: Omit<Document, 'id' | 'number'> = {
       type: 'RECIBO',
@@ -1103,8 +1128,9 @@ class Database {
       status: 'PAGO',
       payment_method: budget.payment_method || 'PIX',
       issue_date: new Date().toISOString().split('T')[0],
-      location_date: `${settings.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
-      notes: settings.notes_recibo_default,
+      location_date: `${activeCompany.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+      notes: activeCompany.notes_recibo_default,
+      company_info: budget.company_info,
       convert_from_id: budget.id
     };
 
