@@ -135,18 +135,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </div>
         </form>
 
-        {/* Dicas de Credenciais Administrativas */}
-        <div className="mt-6 rounded-lg bg-blue-50/70 p-4 border border-blue-150 text-xs">
-          <div className="flex gap-2 items-start text-blue-800 font-semibold mb-1">
-            <Info className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>Superusuário Administrativo</span>
-          </div>
-          <p className="text-gray-600 font-medium leading-relaxed pl-6">
-            Utilize as credenciais solicitadas abaixo para liberação total:<br />
-            <strong className="text-blue-900 select-all">E-mail:</strong> suporte@unityautomacoes.com.br<br />
-            <strong className="text-blue-900 select-all">Senha:</strong> 200616
-          </p>
-        </div>
       </div>
     </div>
   );

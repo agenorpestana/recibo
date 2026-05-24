@@ -240,6 +240,46 @@ async function startServer() {
     }
   });
 
+  // 5.5. CRUD Outras Empresas
+  app.get('/api/companies', async (req, res) => {
+    try {
+      const companies = await db.getCompanies();
+      res.json(companies);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao carregar empresas.' });
+    }
+  });
+
+  app.post('/api/companies', async (req, res) => {
+    try {
+      const newCompany = await db.createCompany(req.body);
+      res.status(201).json(newCompany);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao cadastrar empresa.' });
+    }
+  });
+
+  app.put('/api/companies/:id', async (req, res) => {
+    try {
+      const updated = await db.updateCompany(req.params.id, req.body);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao atualizar empresa.' });
+    }
+  });
+
+  app.delete('/api/companies/:id', async (req, res) => {
+    try {
+      const success = await db.deleteCompany(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: 'Empresa não encontrada.' });
+      }
+      res.json({ success: true, message: 'Empresa excluída com sucesso.' });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message || 'Erro ao deletar empresa.' });
+    }
+  });
+
   // 6. Relatórios Financeiros Automáticos
   app.get('/api/reports/stats', async (req, res) => {
     try {

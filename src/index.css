@@ -9,35 +9,35 @@
 
 /* Regras customizadas para impressão */
 @media print {
-  /* Oculta tudo que não for a área do recibo */
-  body {
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
     background-color: white !important;
     color: black !important;
     font-size: 11px !important;
   }
   
-  /* Oculta painel administrativo, botões, cabeçalho */
-  .no-print, 
-  header, 
-  nav, 
-  aside, 
-  button, 
-  .admin-dashboard,
-  .toast,
-  .modal-overlay:not(.print-modal-overlay) {
-    display: none !important;
+  /* Oculta tudo na tela usando visibilidade, liberando somente a area de impressao real */
+  body * {
+    visibility: hidden !important;
   }
 
-  /* Exibe somente o container de impressão */
+  .print-area, .print-area * {
+    visibility: visible !important;
+  }
+
+  /* Posiciona e exibe somente o container de impressão de forma absoluta na folha */
   .print-area {
-    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: 850px !important;
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
-    background: transparent !important;
+    background: white !important;
   }
 
   /* Garante cores reais de fundo durante impressão */

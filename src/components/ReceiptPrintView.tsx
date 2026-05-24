@@ -7,6 +7,8 @@ interface ReceiptPrintViewProps {
 }
 
 export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, settings }) => {
+  const activeCompany = document.company_info || settings;
+
   const totalBRL = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
@@ -25,10 +27,10 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
 
   // Renderiza o logotipo padrão do modelo caso o usuário não tenha anexado um personalizado
   const renderLogo = () => {
-    if (settings.logo_base64) {
+    if (activeCompany.logo_base64) {
       return (
         <img 
-          src={settings.logo_base64} 
+          src={activeCompany.logo_base64} 
           alt="Logotipo" 
           className="max-h-16 max-w-[160px] object-contain"
           referrerPolicy="no-referrer"
@@ -50,7 +52,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
           {/* Linha horizontal para dar base */}
           <rect x="35" y="15" width="30" height="5" rx="1" fill="#2563EB" opacity="0.2" />
         </svg>
-        <div className="flex flex-col select-none">
+        <div className="flex items-center gap-1.5 ml-1">
           <span className="font-sans font-bold leading-none text-blue-800 text-[18px] tracking-widest">UNITY</span>
           <span className="font-mono text-[9px] text-yellow-600 font-semibold tracking-wider">AUTOMAÇÕES</span>
         </div>
@@ -65,7 +67,7 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
     >
       {/* Topo / Cabeçalho */}
       <div className="flex justify-between items-start border-b border-gray-200 pb-4 mb-4">
-        <div className="w-1/3">
+        <div className="w-1/3 flex items-center">
           {renderLogo()}
         </div>
         <div className="w-1/3 text-center">
@@ -92,11 +94,11 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
 
       {/* Dados da Empresa */}
       <div className="mb-6">
-        <h2 className="text-lg font-bold text-gray-800 uppercase">{settings.company_name}</h2>
+        <h2 className="text-lg font-bold text-gray-800 uppercase">{activeCompany.company_name}</h2>
         <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-600 mt-1">
-          <p><span className="font-medium text-gray-800">CNPJ:</span> {settings.cnpj} - <span className="font-medium text-gray-800">IE:</span> {settings.ie}</p>
-          <p><span className="font-medium text-gray-800">Telefone:</span> {settings.phone}</p>
-          <p className="col-span-2"><span className="font-medium text-gray-800">Endereço:</span> {settings.address}</p>
+          <p><span className="font-medium text-gray-800">CNPJ:</span> {activeCompany.cnpj} - <span className="font-medium text-gray-800">IE:</span> {activeCompany.ie}</p>
+          <p><span className="font-medium text-gray-800">Telefone:</span> {activeCompany.phone}</p>
+          <p className="col-span-2"><span className="font-medium text-gray-800">Endereço:</span> {activeCompany.address}</p>
         </div>
       </div>
 
@@ -187,14 +189,14 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
         <div className="col-span-7 pr-4 border-r border-gray-300">
           <p className="font-bold text-gray-700 uppercase mb-1">Observações / Termos de Garantia</p>
           <div className="whitespace-pre-line space-y-0.5">
-            {document.notes || (document.type === 'RECIBO' ? settings.notes_recibo_default : settings.notes_orcamento_default)}
+            {document.notes || (document.type === 'RECIBO' ? activeCompany.notes_recibo_default : activeCompany.notes_orcamento_default)}
           </div>
         </div>
         <div className="col-span-5 pl-2 flex flex-col justify-between">
           <div>
             <p className="font-bold text-gray-700 uppercase mb-1">Local e Data:</p>
             <div className="border border-gray-300 rounded p-2 bg-white font-medium text-xs text-gray-800 min-h-[36px] flex items-center">
-              {document.location_date || `${settings.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date(document.issue_date).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`}
+              {document.location_date || `${activeCompany.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date(document.issue_date).toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`}
             </div>
           </div>
           {document.payment_method && (
@@ -208,8 +210,8 @@ export const ReceiptPrintView: React.FC<ReceiptPrintViewProps> = ({ document, se
       {/* Assinaturas */}
       <div className="grid grid-cols-2 gap-12 mt-12 pt-6">
         <div className="text-center">
-          <div className="border-t border-gray-400 w-11/12 mx-auto pt-2 text-xs font-semibold text-gray-800">
-            {settings.company_name.split(' ')[0]} Automações
+          <div className="border-t border-gray-400 w-11/12 mx-auto pt-2 text-xs font-semibold text-gray-800 max-w-[280px] truncate">
+            {activeCompany.company_name}
           </div>
           <span className="text-[9px] text-gray-500 font-mono">Emitente Responsável</span>
         </div>

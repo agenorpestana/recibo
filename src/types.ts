@@ -50,6 +50,7 @@ export interface Document {
   issue_date: string;
   location_date: string;
   notes: string;
+  company_info?: CompanySettings | null;
   convert_from_id?: string | number | null;
   created_at?: string;
   updated_at?: string;

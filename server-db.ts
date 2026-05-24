@@ -19,6 +19,7 @@ interface DatabaseSchema {
   clients: Client[];
   documents: Document[];
   settings: CompanySettings;
+  companies?: (CompanySettings & { id: number })[];
 }
 
 // Configurações padrão corporativas
@@ -68,7 +69,8 @@ class Database {
     users: [...defaultUsers],
     clients: [],
     documents: [],
-    settings: { ...defaultSettings }
+    settings: { ...defaultSettings },
+    companies: [{ ...defaultSettings, id: 1 }]
   };
 
   constructor() {
@@ -88,6 +90,12 @@ class Database {
       } catch (err) {
         // Ignora se a coluna já existia (erro comum em MySQL/MariaDB ao tentar duplicar coluna)
       }
+      try {
+        await pool.query('ALTER TABLE documents ADD COLUMN company_info LONGTEXT DEFAULT NULL');
+        console.log('[Database Migration] Coluna "company_info" inserida na tabela "documents" com sucesso.');
+      } catch (err) {
+        // Ignora se a coluna já existia
+      }
     } catch (e) {
       console.error('[Database Migration] Erro inesperado ao migrar tabela:', e);
     }
@@ -104,7 +112,8 @@ class Database {
           users: parsed.users || [...defaultUsers],
           clients: parsed.clients || [],
           documents: parsed.documents || [],
-          settings: parsed.settings || { ...defaultSettings }
+          settings: parsed.settings || { ...defaultSettings },
+          companies: parsed.companies || [{ ...(parsed.settings || defaultSettings), id: 1 }]
         };
         // Garante que o administrador padrão exista
         const hasAdmin = this.schema.users.some(u => u.email === 'suporte@unityautomacoes.com.br');
@@ -215,6 +224,133 @@ class Database {
       console.error('Erro ao salvar company_settings no MySQL:', error);
       throw error;
     }
+  }
+
+  // --- CRUD MULTIPLAS EMPRESAS ---
+
+  async getCompanies(): Promise<(CompanySettings & { id: number })[]> {
+    if (!pool) {
+      if (!this.schema.companies) {
+        this.schema.companies = [{ ...this.schema.settings, id: 1 }];
+      }
+      return this.schema.companies as (CompanySettings & { id: number })[];
+    }
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM company_settings ORDER BY id ASC');
+      if (rows.length === 0) {
+        await pool.query(
+          'INSERT INTO company_settings (company_name, cnpj, ie, address, phone, email, notes_recibo_default, notes_orcamento_default, logo_base64) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)',
+          [
+            defaultSettings.company_name,
+            defaultSettings.cnpj,
+            defaultSettings.ie,
+            defaultSettings.address,
+            defaultSettings.phone,
+            defaultSettings.email,
+            defaultSettings.notes_recibo_default,
+            defaultSettings.notes_orcamento_default
+          ]
+        );
+        const [reRows]: any = await pool.query('SELECT * FROM company_settings ORDER BY id ASC');
+        return reRows;
+      }
+      return rows;
+    } catch (error) {
+      console.error('Erro ao ler company_settings no MySQL:', error);
+      return [{ ...defaultSettings, id: 1 }];
+    }
+  }
+
+  async createCompany(settings: CompanySettings): Promise<CompanySettings & { id: number }> {
+    if (!pool) {
+      if (!this.schema.companies) {
+        this.schema.companies = [{ ...this.schema.settings, id: 1 }];
+      }
+      const id = Date.now() + Math.floor(Math.random() * 100);
+      const newCompany = { ...settings, id };
+      this.schema.companies.push(newCompany);
+      this.saveJSON();
+      return newCompany;
+    }
+    try {
+      const [res]: any = await pool.query(
+        'INSERT INTO company_settings (company_name, cnpj, ie, address, phone, email, logo_base64, notes_recibo_default, notes_orcamento_default) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          settings.company_name,
+          settings.cnpj,
+          settings.ie,
+          settings.address,
+          settings.phone,
+          settings.email,
+          settings.logo_base64,
+          settings.notes_recibo_default,
+          settings.notes_orcamento_default
+        ]
+      );
+      return { id: res.insertId, ...settings };
+    } catch (error) {
+      console.error('Erro ao criar empresa no MySQL:', error);
+      throw error;
+    }
+  }
+
+  async updateCompany(id: string | number, settings: CompanySettings): Promise<CompanySettings & { id: number }> {
+    const numId = Number(id);
+    if (!pool) {
+      if (!this.schema.companies) {
+        this.schema.companies = [{ ...this.schema.settings, id: 1 }];
+      }
+      const idx = this.schema.companies.findIndex(c => Number(c.id) === numId);
+      if (idx !== -1) {
+        this.schema.companies[idx] = { ...settings, id: numId };
+        if (numId === 1) {
+          this.schema.settings = { ...settings };
+        }
+        this.saveJSON();
+        return this.schema.companies[idx];
+      }
+      throw new Error('Empresa não encontrada.');
+    }
+    try {
+      await pool.query(
+        'UPDATE company_settings SET company_name=?, cnpj=?, ie=?, address=?, phone=?, email=?, logo_base64=?, notes_recibo_default=?, notes_orcamento_default=? WHERE id=?',
+        [
+          settings.company_name,
+          settings.cnpj,
+          settings.ie,
+          settings.address,
+          settings.phone,
+          settings.email,
+          settings.logo_base64,
+          settings.notes_recibo_default,
+          settings.notes_orcamento_default,
+          numId
+        ]
+      );
+      return { id: numId, ...settings };
+    } catch (error) {
+      console.error('Erro ao salvar company_settings no MySQL:', error);
+      throw error;
+    }
+  }
+
+  async deleteCompany(id: string | number): Promise<boolean> {
+    const numId = Number(id);
+    if (numId === 1) {
+      throw new Error('Não é permitido remover a empresa principal do sistema.');
+    }
+    if (!pool) {
+      if (!this.schema.companies) {
+        this.schema.companies = [{ ...this.schema.settings, id: 1 }];
+      }
+      const idx = this.schema.companies.findIndex(c => Number(c.id) === numId);
+      if (idx === -1) return false;
+      this.schema.companies.splice(idx, 1);
+      this.saveJSON();
+      return true;
+    }
+    const [result]: any = await pool.query('DELETE FROM company_settings WHERE id = ?', [numId]);
+    return result.affectedRows > 0;
   }
 
   // --- CRUD USUÁRIOS ---
@@ -578,6 +714,7 @@ class Database {
         location_date: d.location_date || '',
         notes: d.notes || '',
         convert_from_id: d.convert_from_id,
+        company_info: d.company_info ? (typeof d.company_info === 'string' ? JSON.parse(d.company_info) : d.company_info) : null,
         created_at: d.created_at,
         updated_at: d.updated_at,
         items: items
@@ -620,6 +757,7 @@ class Database {
       location_date: d.location_date || '',
       notes: d.notes || '',
       convert_from_id: d.convert_from_id,
+      company_info: d.company_info ? (typeof d.company_info === 'string' ? JSON.parse(d.company_info) : d.company_info) : null,
       created_at: d.created_at,
       updated_at: d.updated_at,
       items: items.map((item: any) => ({
@@ -703,7 +841,7 @@ class Database {
     const total = Math.max(0, subtotal - discount);
 
     const [resDoc]: any = await pool.query(
-      'INSERT INTO documents (number, type, client_id, client_name, client_cnpj, client_address, client_phone, subtotal, discount, total, status, payment_method, issue_date, location_date, notes, convert_from_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO documents (number, type, client_id, client_name, client_cnpj, client_address, client_phone, subtotal, discount, total, status, payment_method, issue_date, location_date, notes, convert_from_id, company_info) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         number,
         doc.type,
@@ -720,7 +858,8 @@ class Database {
         doc.issue_date || new Date().toISOString().split('T')[0],
         doc.location_date || '',
         doc.notes || '',
-        doc.convert_from_id || null
+        doc.convert_from_id || null,
+        doc.company_info ? JSON.stringify(doc.company_info) : null
       ]
     );
 
@@ -788,6 +927,7 @@ class Database {
         subtotal,
         discount,
         total,
+        company_info: updated.company_info !== undefined ? updated.company_info : existing.company_info,
         updated_at: new Date().toISOString()
       };
 
@@ -835,6 +975,7 @@ class Database {
       issue_date: updated.issue_date !== undefined ? updated.issue_date : existing.issue_date,
       location_date: updated.location_date !== undefined ? updated.location_date : existing.location_date,
       notes: updated.notes !== undefined ? updated.notes : existing.notes,
+      company_info: updated.company_info !== undefined ? updated.company_info : (existing.company_info ? (typeof existing.company_info === 'string' ? JSON.parse(existing.company_info) : existing.company_info) : null),
       subtotal,
       discount,
       total
@@ -843,7 +984,7 @@ class Database {
     const issue_date = merged.issue_date instanceof Date ? merged.issue_date.toISOString().split('T')[0] : merged.issue_date;
 
     await pool.query(
-      'UPDATE documents SET client_id=?, client_name=?, client_cnpj=?, client_address=?, client_phone=?, status=?, payment_method=?, issue_date=?, location_date=?, notes=?, subtotal=?, discount=?, total=? WHERE id=?',
+      'UPDATE documents SET client_id=?, client_name=?, client_cnpj=?, client_address=?, client_phone=?, status=?, payment_method=?, issue_date=?, location_date=?, notes=?, subtotal=?, discount=?, total=?, company_info=? WHERE id=?',
       [
         merged.client_id || null,
         merged.client_name,
@@ -858,6 +999,7 @@ class Database {
         merged.subtotal,
         merged.discount,
         merged.total,
+        merged.company_info ? JSON.stringify(merged.company_info) : null,
         id
       ]
     );

@@ -1,21 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Document, Client, DocumentItem, DocumentType, DocumentStatus, CompanySettings } from '../types';
+import { Document, Client, DocumentItem, DocumentType, DocumentStatus, CompanySettings, User } from '../types';
 import { ReceiptPrintView } from './ReceiptPrintView';
 import { 
-  Plus, Search, Filter, Trash2, Printer, Send, Mail, AlertTriangle, Check, X, ArrowLeftRight, CheckSquare, RefreshCw 
+  Plus, Search, Filter, Trash2, Printer, Send, Mail, AlertTriangle, Check, X, ArrowLeftRight, CheckSquare, RefreshCw, Building 
 } from 'lucide-react';
 
 interface ReceiptsTabProps {
   settings: CompanySettings;
   clients: Client[];
   onRefreshStats: () => void;
+  currentUser: User;
 }
 
-export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onRefreshStats }) => {
+export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onRefreshStats, currentUser }) => {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<(CompanySettings & { id: number })[]>([]);
 
   // Filtros
   const [filterSearch, setFilterSearch] = useState('');
@@ -46,6 +48,7 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     client_cnpj: '',
     client_address: '',
     client_phone: '',
+    company_info: null as (CompanySettings & { id: number }) | null,
     issue_date: new Date().toISOString().split('T')[0],
     location_date: '',
     items: [{ quantity: 1, description: '', unit_price: 0 }] as { quantity: number; description: string; unit_price: number }[],
@@ -69,9 +72,22 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     }
   };
 
+  const fetchCompanies = async () => {
+    try {
+      const response = await fetch('/api/companies');
+      if (response.ok) {
+        const data = await response.json();
+        setCompanies(data);
+      }
+    } catch (e) {
+      console.error('Erro ao ler empresas no ReceiptsTab:', e);
+    }
+  };
+
   useEffect(() => {
     fetchDocuments();
-  }, []);
+    fetchCompanies();
+  }, [showFormModal]);
 
   // Monitora alterações de seleção de cliente para preenchimento automático inteligente
   const handleClientSelect = (clientIdVal: string | number) => {
@@ -103,6 +119,11 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
   // Abre formulário para novo documento
   const handleOpenCreateModal = (type: DocumentType) => {
     setEditId(null);
+    const defaultCompany = companies.length > 0 ? companies[0] : null;
+    const activeAddress = defaultCompany ? defaultCompany.address : settings.address;
+    const notesRecDefault = defaultCompany ? defaultCompany.notes_recibo_default : settings.notes_recibo_default;
+    const notesOrcDefault = defaultCompany ? defaultCompany.notes_orcamento_default : settings.notes_orcamento_default;
+
     setFormData({
       type,
       client_id: '',
@@ -110,13 +131,14 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
       client_cnpj: '',
       client_address: '',
       client_phone: '',
+      company_info: defaultCompany,
       issue_date: new Date().toISOString().split('T')[0],
-      location_date: `${settings.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+      location_date: `${activeAddress.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
       items: [{ quantity: 1, description: '', unit_price: 0 }],
       discount: 0,
       status: type === 'RECIBO' ? 'PAGO' : 'PENDENTE',
       payment_method: 'PIX',
-      notes: type === 'RECIBO' ? settings.notes_recibo_default : settings.notes_orcamento_default
+      notes: type === 'RECIBO' ? notesRecDefault : notesOrcDefault
     });
     setError(null);
     setShowFormModal(true);
@@ -202,13 +224,18 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     }
   };
 
-  const handleDeleteDocument = async (id: string | number) => {
+  const handleDeleteDocument = async (doc: Document) => {
+    if (currentUser.role === 'user' && doc.type === 'RECIBO') {
+      alert('Operação Negada: Usuário operador não tem permissão para excluir recibos, apenas orçamentos.');
+      return;
+    }
+
     if (!window.confirm('Excluir este documento de forma permanente? Esta operação é irreversível.')) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Não foi possível remover.');
       
       setSuccess('Documento removido definitivamente.');
@@ -520,9 +547,14 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                         </button>
 
                         <button
-                          onClick={() => handleDeleteDocument(doc.id)}
-                          title="Apagar no sistema"
-                          className="rounded p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          onClick={() => handleDeleteDocument(doc)}
+                          disabled={currentUser.role === 'user' && doc.type === 'RECIBO'}
+                          className={`rounded p-1 transition-colors ${
+                            currentUser.role === 'user' && doc.type === 'RECIBO'
+                              ? 'text-gray-300 cursor-not-allowed opacity-40 bg-transparent'
+                              : 'text-gray-500 hover:text-red-600 hover:bg-red-50'
+                          }`}
+                          title={currentUser.role === 'user' && doc.type === 'RECIBO' ? 'Usuário operador não tem permissão para excluir recibos, apenas orçamentos.' : 'Apagar no sistema'}
                         >
                           <Trash2 className="h-4.5 w-4.5" />
                         </button>
@@ -567,6 +599,38 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                 <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Passo 1: Dados do Cliente e Registro</span>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Empresa Emitente */}
+                  <div className="md:col-span-2 bg-blue-50/20 border border-blue-100 p-3 rounded-lg space-y-2">
+                    <label className="block text-xs font-extrabold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Building className="h-3.5 w-3.5 text-blue-650" />
+                      Empresa Emitente deste Documento *
+                    </label>
+                    <select
+                      value={formData.company_info?.id || ''}
+                      onChange={(e) => {
+                        const matched = companies.find(c => String(c.id) === String(e.target.value));
+                        if (matched) {
+                          setFormData(prev => ({
+                            ...prev,
+                            company_info: matched,
+                            location_date: `${matched.address.split(',').pop()?.trim() || 'Itamaraju-BA'}, em ${new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}`,
+                            notes: prev.type === 'RECIBO' ? matched.notes_recibo_default : matched.notes_orcamento_default
+                          }));
+                        }
+                      }}
+                      className="block w-full rounded-md border border-blue-200 bg-white px-3 py-1.5 text-xs text-gray-900 font-bold focus:border-blue-500 focus:outline-none"
+                    >
+                      {companies.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.company_name} - CNPJ: {c.cnpj}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[9px] text-gray-450 leading-relaxed">
+                      O comprovante ou orçamento impresso usará os dados cadastrados, logotipo e cláusulas contratuais desta empresa.
+                    </p>
+                  </div>
+
                   {/* Autocadastro Rápido */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
