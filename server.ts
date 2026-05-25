@@ -389,16 +389,35 @@ async function startServer() {
 
       const cleanPhone = phone.replace(/\D/g, '');
       const settings = await db.getSettings();
+      
+      const activeCompany = doc.company_info || settings;
+      const companyName = activeCompany.company_name || settings.company_name;
+      const companyPhone = activeCompany.phone || settings.phone;
+
+      // Detecta a origem de forma dinâmica para suportar subdomínios (ex: recibo.unityautomacoes.com.br)
+      let origin = 'https://recibo.unityautomacoes.com.br';
+      if (req.headers.referer) {
+        try {
+          origin = new URL(req.headers.referer).origin;
+        } catch (e) {}
+      } else {
+        const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.get('host');
+        if (host) {
+          origin = `${protocol}://${host}`;
+        }
+      }
+      origin = origin.replace(/\/$/, ''); // Remove barra no final se houver
 
       const greeting = doc.type === 'RECIBO' ? 'Comprovante de Recibo' : 'Orçamento solicitado';
       const totalBRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(doc.total);
       
-      const message = `Olá! Segue o *${greeting}* da *${settings.company_name}*.\n\n` +
+      const message = `Olá! Segue o *${greeting}* da *${companyName}*.\n\n` +
         `📄 *Documento:* ${doc.number}\n` +
         `📅 *Data de Emissão:* ${new Date(doc.issue_date).toLocaleDateString('pt-BR')}\n` +
         `💰 *Valor Total:* ${totalBRL}\n` +
-        `🔗 *Acesse os detalhes para Impressão/Visualização:* ${process.env.APP_URL || 'https://unityautomacoes.com.br'}/view/${doc.id}\n\n` +
-        `Agradecemos a preferência! Caso tenha dúvidas, entre em contato conosco pelo telefone ${settings.phone}.`;
+        `🔗 *Acesse os detalhes para Impressão/Visualização:* ${origin}/view/${doc.id}\n\n` +
+        `Agradecemos a preferência! Caso tenha dúvidas, entre em contato conosco pelo telefone ${companyPhone}.`;
 
       const encodedText = encodeURIComponent(message);
       const apiLink = `https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodedText}`;

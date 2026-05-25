@@ -1169,8 +1169,8 @@ class Database {
     const activeReceipts = docs.filter(d => d.type === 'RECIBO').map(d => ({ ...d, total: Number(d.total) }));
     const activeBudgets = docs.filter(d => d.type === 'ORCAMENTO').map(d => ({ ...d, total: Number(d.total) }));
 
-    const totalReceiptsAmount = activeReceipts.reduce((sum, d) => sum + d.total, 0);
-    const totalBudgetsAmount = activeBudgets.reduce((sum, d) => sum + d.total, 0);
+    const totalReceiptsAmount = activeReceipts.filter(d => d.status !== 'CANCELADO').reduce((sum, d) => sum + d.total, 0);
+    const totalBudgetsAmount = activeBudgets.filter(d => d.status !== 'CANCELADO').reduce((sum, d) => sum + d.total, 0);
 
     const paidReceiptsAmount = activeReceipts.filter(d => d.status === 'PAGO').reduce((sum, d) => sum + d.total, 0);
     const pendingReceiptsAmount = activeReceipts.filter(d => d.status === 'PENDENTE').reduce((sum, d) => sum + d.total, 0);
@@ -1228,8 +1228,8 @@ class Database {
       totalBudgetsAmount,
       paidReceiptsAmount,
       pendingReceiptsAmount,
-      receiptCount: activeReceipts.length,
-      budgetCount: activeBudgets.length,
+      receiptCount: activeReceipts.filter(d => d.status !== 'CANCELADO').length,
+      budgetCount: activeBudgets.filter(d => d.status !== 'CANCELADO').length,
       monthlyReceipts,
       monthlyBudgets,
       statusDistribution,

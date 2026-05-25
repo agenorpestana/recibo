@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Document, Client, DocumentItem, DocumentType, DocumentStatus, CompanySettings, User } from '../types';
 import { ReceiptPrintView } from './ReceiptPrintView';
 import { 
-  Plus, Search, Filter, Trash2, Printer, Send, Mail, AlertTriangle, Check, X, ArrowLeftRight, CheckSquare, RefreshCw, Building 
+  Plus, Search, Filter, Trash2, Printer, Send, Mail, AlertTriangle, Check, X, ArrowLeftRight, CheckSquare, RefreshCw, Building, Pencil, Ban 
 } from 'lucide-react';
 
 interface ReceiptsTabProps {
@@ -294,6 +294,69 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     }
   };
 
+  // Abre o formulário em modo de edição
+  const handleOpenEditModal = (doc: Document) => {
+    setEditId(doc.id);
+    
+    // Associa a empresa correta baseado nas empresas pré-cadastradas
+    const matchedCompany = doc.company_info 
+      ? (companies.find(c => String(c.id) === String((doc.company_info as any)?.id)) || doc.company_info)
+      : (companies.length > 0 ? companies[0] : null);
+
+    setFormData({
+      type: doc.type,
+      client_id: doc.client_id || '',
+      client_name: doc.client_name,
+      client_cnpj: doc.client_cnpj || '',
+      client_address: doc.client_address || '',
+      client_phone: doc.client_phone || '',
+      company_info: matchedCompany as any,
+      issue_date: doc.issue_date,
+      location_date: doc.location_date || '',
+      items: doc.items.map(it => ({
+        quantity: Number(it.quantity) || 1,
+        description: it.description,
+        unit_price: Number(it.unit_price) || 0
+      })),
+      discount: Number(doc.discount) || 0,
+      status: doc.status,
+      payment_method: doc.payment_method || 'PIX',
+      notes: doc.notes || ''
+    });
+    setError(null);
+    setShowFormModal(true);
+  };
+
+  // Cancela o documento com estorno financeiro automático
+  const handleCancelDocument = async (doc: Document) => {
+    if (!window.confirm(`Deseja realmente CANCELAR o documento ${doc.number}? Isto fará o estorno financeiro automático nos relatórios.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/documents/${doc.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'CANCELADO' })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Erro ao cancelar o documento.');
+      }
+
+      setSuccess(`Documento ${doc.number} foi cancelado e estornado com sucesso!`);
+      await fetchDocuments();
+      onRefreshStats();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao cancelar documento.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Envia por WhatsApp ou E-mail
   const handleOpenShare = (doc: Document, type: 'whatsapp' | 'email') => {
     setSelectedDoc(doc);
@@ -525,6 +588,26 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-center gap-1.5">
+                        {/* Editar */}
+                        <button
+                          onClick={() => handleOpenEditModal(doc)}
+                          title="Editar Cadastro/Configurar"
+                          className="rounded p-1 text-amber-500 hover:text-amber-700 hover:bg-amber-50 transition-colors"
+                        >
+                          <Pencil className="h-4.5 w-4.5" />
+                        </button>
+
+                        {/* Cancelar / Estorno Financeiro */}
+                        {doc.status !== 'CANCELADO' && (
+                          <button
+                            onClick={() => handleCancelDocument(doc)}
+                            title="Cancelar Documento (Estornar)"
+                            className="rounded p-1 text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors"
+                          >
+                            <Ban className="h-4.5 w-4.5" />
+                          </button>
+                        )}
+
                         <button
                           onClick={() => {
                             setSelectedDoc(doc);
@@ -536,7 +619,7 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                           <Printer className="h-4.5 w-4.5" />
                         </button>
                         
-                        {doc.type === 'ORCAMENTO' && (
+                        {doc.type === 'ORCAMENTO' && doc.status !== 'CANCELADO' && (
                           <button
                             onClick={() => handleConvertToReceipt(doc.id)}
                             title="Converter Orçamento em Recibo Emitido"
