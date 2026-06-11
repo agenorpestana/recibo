@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Document, Client, DocumentItem, DocumentType, DocumentStatus, CompanySettings, User } from '../types';
+import { Document, Client, DocumentItem, DocumentType, DocumentStatus, CompanySettings, User, Product } from '../types';
 import { ReceiptPrintView } from './ReceiptPrintView';
 import { 
   Plus, Search, Filter, Trash2, Printer, Send, Mail, AlertTriangle, Check, X, ArrowLeftRight, CheckSquare, RefreshCw, Building, Pencil, Ban 
@@ -18,6 +18,7 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [companies, setCompanies] = useState<(CompanySettings & { id: number })[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   // Filtros
   const [filterSearch, setFilterSearch] = useState('');
@@ -84,9 +85,22 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     }
   };
 
+  const fetchProducts = async () => {
+    try {
+      const response = await fetch('/api/products');
+      if (response.ok) {
+        const data = await response.json();
+        setProducts(data);
+      }
+    } catch (e) {
+      console.error('Erro ao ler produtos no ReceiptsTab:', e);
+    }
+  };
+
   useEffect(() => {
     fetchDocuments();
     fetchCompanies();
+    fetchProducts();
   }, [showFormModal]);
 
   const hasCompanySelected = !!formData.company_info;
@@ -182,6 +196,12 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
       ...updatedItems[idx],
       [field]: value
     };
+    if (field === 'description') {
+      const matched = products.find(p => p.name.trim().toLowerCase() === String(value).trim().toLowerCase());
+      if (matched) {
+        updatedItems[idx].unit_price = matched.sale_price;
+      }
+    }
     setFormData(prev => ({ ...prev, items: updatedItems }));
   };
 
@@ -846,16 +866,24 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                         />
                       </div>
 
-                      <div className="flex-1">
+                      <div className="flex-1 relative">
                         <label className="block text-[8px] font-bold text-gray-500 uppercase mb-0.5">Descrição do Serviço ou Produto</label>
                         <input
                           type="text"
                           required
+                          list={`product-suggestions-${index}`}
                           value={item.description}
                           onChange={(e) => handleItemChange(index, 'description', e.target.value)}
                           placeholder="Ex: Formatação de Computador / Peça do Motor..."
                           className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-gray-900"
                         />
+                        <datalist id={`product-suggestions-${index}`}>
+                          {products.map(p => (
+                            <option key={p.id} value={p.name}>
+                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.sale_price)} | Estoque: {p.stock_qty} un
+                            </option>
+                          ))}
+                        </datalist>
                       </div>
 
                       <div className="w-28">

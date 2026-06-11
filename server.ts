@@ -119,6 +119,66 @@ async function startServer() {
     }
   });
 
+  // 2.5 CRUD Produtos (Cadastro de Produtos Extra)
+  app.get('/api/products', async (req, res) => {
+    try {
+      const products = await db.getProducts();
+      res.json(products);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao carregar produtos.' });
+    }
+  });
+
+  app.get('/api/products/:id', async (req, res) => {
+    try {
+      const product = await db.getProductById(req.params.id);
+      if (!product) {
+        return res.status(404).json({ error: 'Produto não encontrado.' });
+      }
+      res.json(product);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao obter produto.' });
+    }
+  });
+
+  app.post('/api/products', async (req, res) => {
+    const { name, sale_price, stock_qty } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'O nome do produto é obrigatório.' });
+    }
+    try {
+      const product = await db.createProduct({
+        name,
+        sale_price: Number(sale_price) || 0,
+        stock_qty: Number(stock_qty) || 0
+      });
+      res.status(201).json(product);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao cadastrar produto.' });
+    }
+  });
+
+  app.put('/api/products/:id', async (req, res) => {
+    try {
+      const product = await db.updateProduct(req.params.id, req.body);
+      res.json(product);
+    } catch (e: any) {
+      res.status(404).json({ error: e.message || 'Erro ao atualizar produto.' });
+    }
+  });
+
+  app.delete('/api/products/:id', async (req, res) => {
+    try {
+      const success = await db.deleteProduct(req.params.id);
+      if (!success) {
+        return res.status(404).json({ error: 'Produto não encontrado.' });
+      }
+      res.json({ success: true, message: 'Produto excluído com sucesso.' });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao deletar produto.' });
+    }
+  });
+
   // 3. CRUD Documentos (Recibos / Orçamentos)
   app.get('/api/documents', async (req, res) => {
     try {

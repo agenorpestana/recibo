@@ -8,18 +8,19 @@ import { User, Client, CompanySettings } from './types';
 import { Login } from './components/Login';
 import { ReceiptsTab } from './components/ReceiptsTab';
 import { ClientsTab } from './components/ClientsTab';
+import { ProductsTab } from './components/ProductsTab';
 import { ReportsTab } from './components/ReportsTab';
 import { CompanySettingsTab } from './components/CompanySettingsTab';
 import { UsersTab } from './components/UsersTab';
 import { 
-  Receipt, Users, BarChart3, Settings, LogOut, CheckSquare, ShieldAlert, Sparkles, ServerCrash, ShieldCheck, Printer
+  Receipt, Users, BarChart3, Settings, LogOut, CheckSquare, ShieldAlert, Sparkles, ServerCrash, ShieldCheck, Printer, Package
 } from 'lucide-react';
 import { ReceiptPrintView } from './components/ReceiptPrintView';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'documents' | 'clients' | 'reports' | 'settings' | 'users'>('documents');
+  const [activeTab, setActiveTab] = useState<'documents' | 'clients' | 'products' | 'reports' | 'settings' | 'users'>('documents');
   
   // Estados compartilhados e atualizados dinamicamente pelo painel central
   const [clients, setClients] = useState<Client[]>([]);
@@ -129,7 +130,7 @@ export default function App() {
   }, [user]);
 
   // Controla se a aba é visível para o perfil atual
-  const isTabAuthorized = (tab: 'documents' | 'clients' | 'reports' | 'settings' | 'users') => {
+  const isTabAuthorized = (tab: 'documents' | 'clients' | 'products' | 'reports' | 'settings' | 'users') => {
     if (user?.role === 'admin') return true;
     return user?.permissions?.includes(tab) || false;
   };
@@ -138,8 +139,8 @@ export default function App() {
   useEffect(() => {
     if (user) {
       if (!isTabAuthorized(activeTab)) {
-        const orderOfTabs: ('documents' | 'clients' | 'reports' | 'settings' | 'users')[] = [
-          'documents', 'clients', 'reports', 'settings', 'users'
+        const orderOfTabs: ('documents' | 'clients' | 'products' | 'reports' | 'settings' | 'users')[] = [
+          'documents', 'clients', 'products', 'reports', 'settings', 'users'
         ];
         const firstAllowed = orderOfTabs.find(t => isTabAuthorized(t));
         if (firstAllowed) {
@@ -283,6 +284,20 @@ export default function App() {
                 </button>
               )}
 
+              {isTabAuthorized('products') && (
+                <button
+                  onClick={() => setActiveTab('products')}
+                  className={`px-4 py-2 border-b-2 text-xs font-bold leading-5 transition-colors flex items-center gap-2 ${
+                    activeTab === 'products'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <Package className="h-4 w-4" />
+                  Cadastro de Produtos
+                </button>
+              )}
+
               {isTabAuthorized('reports') && (
                 <button
                   onClick={() => setActiveTab('reports')}
@@ -382,6 +397,19 @@ export default function App() {
           </button>
         )}
 
+        {isTabAuthorized('products') && (
+          <button
+            onClick={() => setActiveTab('products')}
+            title="Produtos"
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-[9px] font-bold ${
+              activeTab === 'products' ? 'bg-blue-50 text-blue-600' : 'text-gray-500'
+            }`}
+          >
+            <Package className="h-5 w-5" />
+            Produtos
+          </button>
+        )}
+
         {isTabAuthorized('reports') && (
           <button
             onClick={() => setActiveTab('reports')}
@@ -445,6 +473,10 @@ export default function App() {
 
             {activeTab === 'clients' && isTabAuthorized('clients') && (
               <ClientsTab onRefreshClientsList={refreshSharedClients} />
+            )}
+
+            {activeTab === 'products' && isTabAuthorized('products') && (
+              <ProductsTab />
             )}
 
             {activeTab === 'reports' && isTabAuthorized('reports') && (

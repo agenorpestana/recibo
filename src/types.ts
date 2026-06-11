@@ -80,3 +80,13 @@ export interface FinancialStats {
   statusDistribution: { status: DocumentStatus; count: number; total: number }[];
   recentActivity: { id: string | number; type: DocumentType; client_name: string; total: number; issue_date: string; status: DocumentStatus }[];
 }
+
+export interface Product {
+  id: string | number;
+  name: string;
+  sale_price: number;
+  stock_qty: number;
+  created_at?: string;
+  updated_at?: string;
+}
+

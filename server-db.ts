@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
-import { Client, Document, CompanySettings, User, DocumentType, DocumentStatus, FinancialStats } from './src/types';
+import { Client, Document, CompanySettings, User, DocumentType, DocumentStatus, FinancialStats, Product } from './src/types';
 
 // O banco de dados local será salvo neste arquivo JSON caso o MySQL não esteja ativo.
 const DB_FILE_PATH = path.join(process.cwd(), 'data', 'db.json');
@@ -20,6 +20,7 @@ interface DatabaseSchema {
   documents: Document[];
   settings: CompanySettings;
   companies?: (CompanySettings & { id: number })[];
+  products?: Product[];
 }
 
 // Configurações padrão corporativas
@@ -70,7 +71,8 @@ class Database {
     clients: [],
     documents: [],
     settings: { ...defaultSettings },
-    companies: [{ ...defaultSettings, id: 1 }]
+    companies: [{ ...defaultSettings, id: 1 }],
+    products: []
   };
 
   constructor() {
@@ -104,6 +106,22 @@ class Database {
         console.error('[Database Migration] Erro ao criar ou validar tabela "company_settings":', err);
       }
 
+      // Cria a tabela de produtos se ela não existir
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS products (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NOT NULL,
+            sale_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            stock_qty DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('[Database Migration] Tabela "products" criada ou validada com sucesso.');
+      } catch (err) {
+        console.error('[Database Migration] Erro ao criar ou validar tabela "products":', err);
+      }
+
       // Executa consulta para verificar se a coluna permissions existe ou simplesmente executa alteração em bloco trycatch
       try {
         await pool.query('ALTER TABLE users ADD COLUMN permissions TEXT DEFAULT NULL');
@@ -134,7 +152,8 @@ class Database {
           clients: parsed.clients || [],
           documents: parsed.documents || [],
           settings: parsed.settings || { ...defaultSettings },
-          companies: parsed.companies || [{ ...(parsed.settings || defaultSettings), id: 1 }]
+          companies: parsed.companies || [{ ...(parsed.settings || defaultSettings), id: 1 }],
+          products: parsed.products || []
         };
         // Garante que o administrador padrão exista
         const hasAdmin = this.schema.users.some(u => u.email === 'suporte@unityautomacoes.com.br');
@@ -702,6 +721,101 @@ class Database {
       return deleted;
     }
     const [result]: any = await pool.query('DELETE FROM clients WHERE id = ?', [id]);
+    return result.affectedRows > 0;
+  }
+
+  // --- CRUD PRODUTOS ---
+
+  async getProducts(): Promise<Product[]> {
+    if (!pool) {
+      return this.schema.products || [];
+    }
+    const [rows]: any = await pool.query('SELECT * FROM products ORDER BY name ASC');
+    return rows.map((r: any) => ({
+      ...r,
+      sale_price: Number(r.sale_price) || 0,
+      stock_qty: Number(r.stock_qty) || 0
+    }));
+  }
+
+  async getProductById(id: string | number): Promise<Product | undefined> {
+    if (!pool) {
+      return (this.schema.products || []).find(p => String(p.id) === String(id));
+    }
+    const [rows]: any = await pool.query('SELECT * FROM products WHERE id = ?', [id]);
+    if (rows[0]) {
+      rows[0].sale_price = Number(rows[0].sale_price) || 0;
+      rows[0].stock_qty = Number(rows[0].stock_qty) || 0;
+    }
+    return rows[0];
+  }
+
+  async createProduct(product: Omit<Product, 'id'>): Promise<Product> {
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const id = Date.now() + Math.floor(Math.random() * 100);
+      const newProduct: Product = { 
+        id, 
+        name: product.name, 
+        sale_price: Number(product.sale_price) || 0, 
+        stock_qty: Number(product.stock_qty) || 0 
+      };
+      this.schema.products.push(newProduct);
+      this.saveJSON();
+      return newProduct;
+    }
+    const [result]: any = await pool.query(
+      'INSERT INTO products (name, sale_price, stock_qty) VALUES (?, ?, ?)',
+      [product.name, Number(product.sale_price) || 0, Number(product.stock_qty) || 0]
+    );
+    return { 
+      id: result.insertId, 
+      name: product.name, 
+      sale_price: Number(product.sale_price) || 0, 
+      stock_qty: Number(product.stock_qty) || 0 
+    };
+  }
+
+  async updateProduct(id: string | number, updated: Partial<Product>): Promise<Product> {
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const index = this.schema.products.findIndex(p => String(p.id) === String(id));
+      if (index === -1) throw new Error("Produto não encontrado.");
+      this.schema.products[index] = {
+        ...this.schema.products[index],
+        ...updated,
+        sale_price: updated.sale_price !== undefined ? Number(updated.sale_price) : this.schema.products[index].sale_price,
+        stock_qty: updated.stock_qty !== undefined ? Number(updated.stock_qty) : this.schema.products[index].stock_qty,
+        id: this.schema.products[index].id
+      };
+      this.saveJSON();
+      return this.schema.products[index];
+    }
+    const [rows]: any = await pool.query('SELECT * FROM products WHERE id = ?', [id]);
+    if (rows.length === 0) throw new Error("Produto não encontrado.");
+    const cur = rows[0];
+    const merged = {
+      name: updated.name !== undefined ? updated.name : cur.name,
+      sale_price: updated.sale_price !== undefined ? Number(updated.sale_price) : (Number(cur.sale_price) || 0),
+      stock_qty: updated.stock_qty !== undefined ? Number(updated.stock_qty) : (Number(cur.stock_qty) || 0),
+    };
+    await pool.query(
+      'UPDATE products SET name=?, sale_price=?, stock_qty=? WHERE id=?',
+      [merged.name, merged.sale_price, merged.stock_qty, id]
+    );
+    return { id, ...merged };
+  }
+
+  async deleteProduct(id: string | number): Promise<boolean> {
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const originalLength = this.schema.products.length;
+      this.schema.products = this.schema.products.filter(p => String(p.id) !== String(id));
+      const deleted = this.schema.products.length < originalLength;
+      if (deleted) this.saveJSON();
+      return deleted;
+    }
+    const [result]: any = await pool.query('DELETE FROM products WHERE id = ?', [id]);
     return result.affectedRows > 0;
   }
 
