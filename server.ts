@@ -353,6 +353,15 @@ async function startServer() {
     }
   });
 
+  app.get('/api/reports/product-movements', async (req, res) => {
+    try {
+      const data = await db.getProductMovements();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao obter movimentação de produtos.' });
+    }
+  });
+
   // 6.5. CRUD Usuários (Controle de Acesso)
   app.get('/api/users', async (req, res) => {
     try {

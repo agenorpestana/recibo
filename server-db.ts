@@ -1334,14 +1334,111 @@ class Database {
 
   async deleteDocument(id: string | number): Promise<boolean> {
     if (!pool) {
+      const existing = this.schema.documents.find(d => String(d.id) === String(id));
+      if (!existing) return false;
+
+      const wasActiveReceipt = existing.type === 'RECIBO' && existing.status !== 'CANCELADO';
+      if (wasActiveReceipt && existing.items) {
+        for (const item of existing.items) {
+          await this.adjustStock(item.description, item.quantity);
+        }
+      }
+
       const originalLength = this.schema.documents.length;
       this.schema.documents = this.schema.documents.filter(d => String(d.id) !== String(id));
       const deleted = this.schema.documents.length < originalLength;
       if (deleted) this.saveJSON();
       return deleted;
     }
+
+    const [docs]: any = await pool.query('SELECT * FROM documents WHERE id = ?', [id]);
+    if (docs.length === 0) return false;
+    const existing = docs[0];
+
+    const wasActiveReceipt = existing.type === 'RECIBO' && existing.status !== 'CANCELADO';
+    if (wasActiveReceipt) {
+      const [prevItemsRows]: any = await pool.query('SELECT * FROM document_items WHERE document_id = ?', [id]);
+      for (const item of prevItemsRows) {
+        await this.adjustStock(item.description || '', Number(item.quantity) || 0);
+      }
+    }
+
+    // Deletar itens do banco primeiro, depois o documento principal.
+    await pool.query('DELETE FROM document_items WHERE document_id = ?', [id]);
     const [result]: any = await pool.query('DELETE FROM documents WHERE id = ?', [id]);
     return result.affectedRows > 0;
+  }
+
+  async getProductMovements(): Promise<any> {
+    const products = await this.getProducts();
+    let logs: any[] = [];
+
+    if (!pool) {
+      const documents = this.schema.documents || [];
+      const receipts = documents.filter(d => d.type === 'RECIBO');
+
+      for (const r of receipts) {
+        const items = r.items || [];
+        for (const item of items) {
+          logs.push({
+            document_id: r.id,
+            document_number: r.number,
+            client_name: r.client_name,
+            issue_date: r.issue_date,
+            status: r.status,
+            product_name: item.description,
+            quantity: Number(item.quantity) || 0,
+            unit_price: Number(item.unit_price) || 0,
+            total_price: Number(item.total_price) || 0
+          });
+        }
+      }
+    } else {
+      const [rows]: any = await pool.query(`
+        SELECT 
+          d.id as document_id,
+          d.number as document_number,
+          d.client_name,
+          d.issue_date,
+          d.status,
+          di.description as product_name,
+          di.quantity,
+          di.unit_price,
+          di.total_price
+        FROM document_items di
+        INNER JOIN documents d ON di.document_id = d.id
+        WHERE d.type = 'RECIBO'
+        ORDER BY d.issue_date DESC
+      `);
+      logs = rows.map((r: any) => ({
+        ...r,
+        quantity: Number(r.quantity) || 0,
+        unit_price: Number(r.unit_price) || 0,
+        total_price: Number(r.total_price) || 0
+      }));
+    }
+
+    const activeReceiptsLogs = logs.filter(l => l.status !== 'CANCELADO');
+
+    const productsSummary = products.map(p => {
+      const pLogs = activeReceiptsLogs.filter(l => l.product_name.trim().toLowerCase() === p.name.trim().toLowerCase());
+      const totalQuantitySold = pLogs.reduce((sum, l) => sum + l.quantity, 0);
+      const totalRevenue = pLogs.reduce((sum, l) => sum + l.total_price, 0);
+
+      return {
+        id: p.id,
+        name: p.name,
+        current_stock: p.stock_qty,
+        sale_price: p.sale_price,
+        total_qty_sold: totalQuantitySold,
+        total_revenue: totalRevenue,
+      };
+    });
+
+    return {
+      movements: logs,
+      productsSummary
+    };
   }
 
   // --- FINANÇAS ---
