@@ -820,6 +820,30 @@ class Database {
     return result.affectedRows > 0;
   }
 
+  async adjustStock(description: string, quantityChange: number): Promise<void> {
+    if (!description) return;
+    const cleanDesc = description.trim().toLowerCase();
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const prod = this.schema.products.find(p => p.name.trim().toLowerCase() === cleanDesc);
+      if (prod) {
+        prod.stock_qty = (Number(prod.stock_qty) || 0) + quantityChange;
+        this.saveJSON();
+      }
+      return;
+    }
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [description]);
+      if (rows.length > 0) {
+        const prod = rows[0];
+        const newStock = (Number(prod.stock_qty) || 0) + quantityChange;
+        await pool.query('UPDATE products SET stock_qty = ? WHERE id = ?', [newStock, prod.id]);
+      }
+    } catch (err) {
+      console.error('[Stock Adjustment] Error updating stock for item:', description, err);
+    }
+  }
+
   // --- CRUD DOCUMENTOS ---
 
   async getDocuments(): Promise<Document[]> {
@@ -947,6 +971,13 @@ class Database {
 
       this.schema.documents.push(newDoc);
       this.saveJSON();
+
+      if (newDoc.type === 'RECIBO' && newDoc.status !== 'CANCELADO') {
+        for (const item of processedItems) {
+          await this.adjustStock(item.description, -item.quantity);
+        }
+      }
+
       return newDoc;
     }
 
@@ -1006,6 +1037,12 @@ class Database {
         'INSERT INTO document_items (document_id, quantity, description, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
         [docId, item.quantity, item.description, item.unit_price, item.total_price]
       );
+    }
+
+    if (doc.type === 'RECIBO' && (doc.status || 'PENDENTE') !== 'CANCELADO') {
+      for (const item of processedItems) {
+        await this.adjustStock(item.description, -item.quantity);
+      }
     }
 
     return {
@@ -1068,6 +1105,21 @@ class Database {
         updated_at: new Date().toISOString()
       };
 
+      const wasActiveReceipt = existing.type === 'RECIBO' && existing.status !== 'CANCELADO';
+      const isActiveReceipt = updatedDoc.type === 'RECIBO' && updatedDoc.status !== 'CANCELADO';
+
+      if (wasActiveReceipt) {
+        for (const item of existing.items) {
+          await this.adjustStock(item.description, item.quantity);
+        }
+      }
+
+      if (isActiveReceipt) {
+        for (const item of processedItems) {
+          await this.adjustStock(item.description, -item.quantity);
+        }
+      }
+
       this.schema.documents[index] = updatedDoc;
       this.saveJSON();
       return updatedDoc;
@@ -1076,6 +1128,13 @@ class Database {
     const [docs]: any = await pool.query('SELECT * FROM documents WHERE id = ?', [id]);
     if (docs.length === 0) throw new Error("Documento não encontrado.");
     const existing = docs[0];
+
+    const wasActiveReceipt = existing.type === 'RECIBO' && existing.status !== 'CANCELADO';
+    const [prevItemsRows]: any = await pool.query('SELECT * FROM document_items WHERE document_id = ?', [id]);
+    const previousItems = prevItemsRows.map((it: any) => ({
+      description: it.description || '',
+      quantity: Number(it.quantity) || 0
+    }));
 
     const items = updated.items !== undefined ? updated.items : null;
     const discount = updated.discount !== undefined ? Number(updated.discount) : Number(existing.discount);
@@ -1158,6 +1217,21 @@ class Database {
         unit_price: Number(it.unit_price),
         total_price: Number(it.total_price)
       }));
+    }
+
+    const currentType = updated.type !== undefined ? updated.type : existing.type;
+    const isActiveReceipt = currentType === 'RECIBO' && merged.status !== 'CANCELADO';
+
+    if (wasActiveReceipt) {
+      for (const item of previousItems) {
+        await this.adjustStock(item.description, item.quantity);
+      }
+    }
+
+    if (isActiveReceipt) {
+      for (const item of processedItems) {
+        await this.adjustStock(item.description, -item.quantity);
+      }
     }
 
     return {

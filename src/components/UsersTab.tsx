@@ -157,6 +157,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ currentUser }) => {
   const availableAbas = [
     { key: 'documents', label: 'Recibos & Orçamentos', desc: 'Permite criar, visualizar e imprimir documentos' },
     { key: 'clients', label: 'Cadastro de Clientes', desc: 'Acesso para cadastrar e gerenciar clientes da base' },
+    { key: 'products', label: 'Cadastro de Produtos', desc: 'Acesso para cadastrar e gerenciar produtos e estoque' },
     { key: 'reports', label: 'Relatório Financeiro', desc: 'Permite analisar estatísticas e desempenho geral' },
     { key: 'settings', label: 'Configurações Gerais', desc: 'Permite alterar logotipo e dados comerciais da empresa' },
     { key: 'users', label: 'Gerenciador de Usuários', desc: 'Controle de acessos de outros operadores' }
