@@ -190,18 +190,33 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
     }));
   };
 
-  const handleItemChange = (idx: number, field: string, value: any) => {
+  const handleItemChange = (idx: number, fieldOrUpdates: string | Record<string, any>, value?: any) => {
     const updatedItems = [...formData.items];
-    updatedItems[idx] = {
-      ...updatedItems[idx],
-      [field]: value
-    };
-    if (field === 'description') {
-      const matched = products.find(p => p.name.trim().toLowerCase() === String(value).trim().toLowerCase());
-      if (matched) {
-        updatedItems[idx].unit_price = matched.sale_price;
+    
+    if (typeof fieldOrUpdates === 'object') {
+      updatedItems[idx] = {
+        ...updatedItems[idx],
+        ...fieldOrUpdates
+      };
+      if (fieldOrUpdates.description !== undefined) {
+        const matched = products.find(p => p.name.trim().toLowerCase() === String(fieldOrUpdates.description).trim().toLowerCase());
+        if (matched) {
+          updatedItems[idx].unit_price = matched.sale_price;
+        }
+      }
+    } else {
+      updatedItems[idx] = {
+        ...updatedItems[idx],
+        [fieldOrUpdates]: value
+      };
+      if (fieldOrUpdates === 'description') {
+        const matched = products.find(p => p.name.trim().toLowerCase() === String(value).trim().toLowerCase());
+        if (matched) {
+          updatedItems[idx].unit_price = matched.sale_price;
+        }
       }
     }
+    
     setFormData(prev => ({ ...prev, items: updatedItems }));
   };
 
@@ -880,8 +895,7 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
                             <button
                               type="button"
                               onClick={() => {
-                                handleItemChange(index, 'description', '');
-                                handleItemChange(index, 'unit_price', '0');
+                                handleItemChange(index, { description: '', unit_price: 0 });
                               }}
                               className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 rounded p-1 hover:bg-red-50 transition-colors cursor-pointer"
                               title="Desvincular produto para digitar manualmente"
