@@ -476,7 +476,7 @@ export default function App() {
             )}
 
             {activeTab === 'products' && isTabAuthorized('products') && (
-              <ProductsTab />
+              <ProductsTab currentUser={user} />
             )}
 
             {activeTab === 'reports' && isTabAuthorized('reports') && (

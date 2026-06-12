@@ -81,11 +81,20 @@ export interface FinancialStats {
   recentActivity: { id: string | number; type: DocumentType; client_name: string; total: number; issue_date: string; status: DocumentStatus }[];
 }
 
+export interface StockLaunch {
+  id: string | number;
+  product_id: string | number;
+  quantity: number;
+  created_at: string;
+}
+
 export interface Product {
   id: string | number;
   name: string;
   sale_price: number;
   stock_qty: number;
+  initial_stock?: number;
+  stock_launches?: StockLaunch[];
   created_at?: string;
   updated_at?: string;
 }

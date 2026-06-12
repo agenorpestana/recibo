@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Product } from '../types';
-import { PackagePlus, Search, Edit2, Trash2, X, Check, Package } from 'lucide-react';
+import { Product, User } from '../types';
+import { PackagePlus, Search, Edit2, Trash2, X, Check, Package, Sparkles } from 'lucide-react';
 
 interface ProductsTabProps {
   onRefreshProductsList?: () => void;
+  currentUser?: User | null;
 }
 
-export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList }) => {
+export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList, currentUser }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,6 +17,8 @@ export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList 
   // Estados do Formulário de Edição / Criação
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState<string | number | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [launchQty, setLaunchQty] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     sale_price: '',
@@ -42,6 +45,8 @@ export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList 
 
   const handleOpenCreateModal = () => {
     setEditId(null);
+    setSelectedProduct(null);
+    setLaunchQty('');
     setFormData({ name: '', sale_price: '', stock_qty: '' });
     setError(null);
     setShowModal(true);
@@ -49,6 +54,8 @@ export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList 
 
   const handleOpenEditModal = (product: Product) => {
     setEditId(product.id);
+    setSelectedProduct(product);
+    setLaunchQty('');
     setFormData({
       name: product.name,
       sale_price: String(product.sale_price),
@@ -56,6 +63,98 @@ export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList 
     });
     setError(null);
     setShowModal(true);
+  };
+
+  const handleInsertStockLaunch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editId) return;
+    const qtyNum = parseFloat(launchQty);
+    if (isNaN(qtyNum) || qtyNum === 0) {
+      setError('Insira uma quantidade válida para lançar.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/products/${editId}/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity: qtyNum })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao lançar estoque.');
+      }
+
+      setSuccess(`Lançado com sucesso: +${qtyNum} un em estoque!`);
+      setLaunchQty('');
+      
+      // Atualiza lista completa
+      const updatedProductsResp = await fetch('/api/products');
+      if (updatedProductsResp.ok) {
+        const list = await updatedProductsResp.json();
+        setProducts(list);
+        const updated = list.find((p: Product) => String(p.id) === String(editId));
+        if (updated) {
+          setSelectedProduct(updated);
+          setFormData((prev) => ({ ...prev, stock_qty: String(updated.stock_qty) }));
+        }
+      }
+
+      if (onRefreshProductsList) onRefreshProductsList();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao reajustar estoque.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteInitialStock = async () => {
+    if (!editId || !selectedProduct) return;
+    const initial = selectedProduct.initial_stock || 0;
+    
+    if (!window.confirm(`Tem certeza que deseja excluir o estoque inicial de ${initial} un deste produto? O estoque geral será reduzido em ${initial} un.`)) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/products/${editId}/delete-initial-stock`, {
+        method: 'POST'
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao remover estoque inicial.');
+      }
+
+      setSuccess('Estoque inicial excluído com sucesso!');
+      
+      // Atualiza lista completa
+      const updatedProductsResp = await fetch('/api/products');
+      if (updatedProductsResp.ok) {
+        const list = await updatedProductsResp.json();
+        setProducts(list);
+        const updated = list.find((p: Product) => String(p.id) === String(editId));
+        if (updated) {
+          setSelectedProduct(updated);
+          setFormData((prev) => ({ ...prev, stock_qty: String(updated.stock_qty) }));
+        }
+      }
+
+      if (onRefreshProductsList) onRefreshProductsList();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao remover estoque inicial.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveProduct = async (e: React.FormEvent) => {
@@ -296,19 +395,93 @@ export const ProductsTab: React.FC<ProductsTabProps> = ({ onRefreshProductsList 
 
                 <div>
                   <label className="block text-xs font-bold text-gray-750 uppercase tracking-wide mb-1.5">
-                    Qtd. em Estoque
+                    Qtd. em Estoque {editId && '(Bloqueado)'}
                   </label>
                   <input
                     type="number"
                     step="1"
                     min="0"
                     placeholder="0"
+                    disabled={!!editId}
                     value={formData.stock_qty}
                     onChange={(e) => setFormData({ ...formData, stock_qty: e.target.value })}
-                    className="block w-full rounded-lg border border-gray-200 bg-white py-2 px-3 text-sm focus:border-blue-500 focus:outline-none"
+                    className={`block w-full rounded-lg border border-gray-200 py-2 px-3 text-sm focus:border-blue-500 focus:outline-none ${
+                      editId ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed font-medium' : 'bg-white text-gray-800'
+                    }`}
                   />
                 </div>
               </div>
+
+              {editId && selectedProduct && (
+                <div className="border border-gray-200 rounded-lg bg-gray-50 p-3 space-y-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <div>
+                      <span className="font-bold text-gray-500 block uppercase tracking-wide text-[10px]">Estoque Inicial</span>
+                      <span className="text-sm font-extrabold text-gray-800 font-mono">
+                        {selectedProduct.initial_stock !== undefined ? selectedProduct.initial_stock : selectedProduct.stock_qty} un
+                      </span>
+                    </div>
+
+                    {currentUser?.role === 'admin' && Number(selectedProduct.initial_stock) > 0 ? (
+                      <button
+                        type="button"
+                        onClick={handleDeleteInitialStock}
+                        className="rounded px-2.5 py-1 text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors cursor-pointer"
+                      >
+                        Excluir Estoque Inicial
+                      </button>
+                    ) : (
+                      Number(selectedProduct.initial_stock) > 0 && (
+                        <span className="text-[10px] text-gray-400 italic">Exclusão restrita ao Admin</span>
+                      )
+                    )}
+                  </div>
+
+                  {/* Formulário de Lançamento */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-extrabold text-gray-600 uppercase tracking-wide">
+                      Inserir Qtd Estoque
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Quantidade a adicionar. Ex: 12"
+                        value={launchQty}
+                        onChange={(e) => setLaunchQty(e.target.value)}
+                        className="block w-full rounded-lg border border-gray-200 bg-white py-1.5 px-3 text-xs focus:border-blue-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleInsertStockLaunch}
+                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-blue-700 transition-colors shrink-0"
+                      >
+                        Inserir
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista de lançamentos */}
+                  {selectedProduct.stock_launches && selectedProduct.stock_launches.length > 0 && (
+                    <div className="space-y-1 bg-white border border-gray-200 p-2 rounded-lg max-h-32 overflow-y-auto">
+                      <span className="block text-[9px] font-bold uppercase tracking-widest text-gray-400 mb-1">
+                        Histórico de Lançamentos
+                      </span>
+                      <div className="divide-y divide-gray-100 text-[10px]">
+                        {selectedProduct.stock_launches.map((launch, index) => (
+                          <div key={launch.id || index} className="flex justify-between items-center py-1 text-gray-650">
+                            <span className="font-medium text-emerald-700">
+                              +{launch.quantity} un
+                            </span>
+                            <span className="text-gray-400 font-mono">
+                              {new Date(launch.created_at).toLocaleDateString('pt-BR')} {new Date(launch.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t mt-6">
                 <button

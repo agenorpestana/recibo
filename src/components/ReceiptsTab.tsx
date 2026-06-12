@@ -868,22 +868,47 @@ export const ReceiptsTab: React.FC<ReceiptsTabProps> = ({ settings, clients, onR
 
                       <div className="flex-1 relative">
                         <label className="block text-[8px] font-bold text-gray-500 uppercase mb-0.5">Descrição do Serviço ou Produto</label>
-                        <input
-                          type="text"
-                          required
-                          list={`product-suggestions-${index}`}
-                          value={item.description}
-                          onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                          placeholder="Ex: Formatação de Computador / Peça do Motor..."
-                          className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-gray-900"
-                        />
-                        <datalist id={`product-suggestions-${index}`}>
-                          {products.map(p => (
-                            <option key={p.id} value={p.name}>
-                              {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.sale_price)} | Estoque: {p.stock_qty} un
-                            </option>
-                          ))}
-                        </datalist>
+                        {products.some(p => p.name.trim().toLowerCase() === item.description.trim().toLowerCase()) ? (
+                          <div className="relative flex items-center">
+                            <input
+                              type="text"
+                              required
+                              readOnly
+                              value={item.description}
+                              className="block w-full rounded border border-blue-200 bg-blue-50/50 pr-8 pl-2 py-1.5 text-xs text-blue-900 font-bold focus:outline-none cursor-default"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleItemChange(index, 'description', '');
+                                handleItemChange(index, 'unit_price', '0');
+                              }}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500 rounded p-1 hover:bg-red-50 transition-colors cursor-pointer"
+                              title="Desvincular produto para digitar manualmente"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <input
+                              type="text"
+                              required
+                              list={`product-suggestions-${index}`}
+                              value={item.description}
+                              onChange={(e) => handleItemChange(index, 'description', e.target.value)}
+                              placeholder="Ex: Formatação de Computador / Peça do Motor..."
+                              className="block w-full rounded border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-blue-500 focus:outline-none"
+                            />
+                            <datalist id={`product-suggestions-${index}`}>
+                              {products.map(p => (
+                                <option key={p.id} value={p.name}>
+                                  {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(p.sale_price)} | Estoque: {p.stock_qty} un
+                                </option>
+                              ))}
+                            </datalist>
+                          </>
+                        )}
                       </div>
 
                       <div className="w-28">

@@ -168,6 +168,25 @@ async function startServer() {
     }
   });
 
+  app.post('/api/products/:id/launch', async (req, res) => {
+    const { quantity } = req.body;
+    try {
+      const product = await db.insertStockLaunch(req.params.id, Number(quantity) || 0);
+      res.json(product);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao reajustar estoque.' });
+    }
+  });
+
+  app.post('/api/products/:id/delete-initial-stock', async (req, res) => {
+    try {
+      const product = await db.deleteInitialStock(req.params.id);
+      res.json(product);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao remover estoque inicial.' });
+    }
+  });
+
   app.delete('/api/products/:id', async (req, res) => {
     try {
       const success = await db.deleteProduct(req.params.id);

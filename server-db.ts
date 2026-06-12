@@ -115,12 +115,36 @@ class Database {
             name VARCHAR(255) NOT NULL,
             sale_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             stock_qty DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            initial_stock DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         `);
         console.log('[Database Migration] Tabela "products" criada ou validada com sucesso.');
       } catch (err) {
         console.error('[Database Migration] Erro ao criar ou validar tabela "products":', err);
+      }
+
+      // Adiciona coluna initial_stock caso a tabela products já existisse sem ela
+      try {
+        await pool.query('ALTER TABLE products ADD COLUMN initial_stock DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+        console.log('[Database Migration] Coluna "initial_stock" validada na tabela "products".');
+      } catch (err) {
+        // Já existia
+      }
+
+      // Cria a tabela de lançamentos de estoque se não existir
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS product_stock_launches (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            product_id INT NOT NULL,
+            quantity DECIMAL(10,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('[Database Migration] Tabela "product_stock_launches" criada ou validada.');
+      } catch (err) {
+        console.error('[Database Migration] Erro ao criar "product_stock_launches":', err);
       }
 
       // Executa consulta para verificar se a coluna permissions existe ou simplesmente executa alteração em bloco trycatch
@@ -729,29 +753,81 @@ class Database {
 
   async getProducts(): Promise<Product[]> {
     if (!pool) {
-      return this.schema.products || [];
+      if (!this.schema.products) this.schema.products = [];
+      return this.schema.products.map(p => ({
+        ...p,
+        sale_price: Number(p.sale_price) || 0,
+        stock_qty: Number(p.stock_qty) || 0,
+        initial_stock: Number(p.initial_stock !== undefined ? p.initial_stock : p.stock_qty) || 0,
+        stock_launches: p.stock_launches || []
+      }));
     }
     const [rows]: any = await pool.query('SELECT * FROM products ORDER BY name ASC');
-    return rows.map((r: any) => ({
-      ...r,
-      sale_price: Number(r.sale_price) || 0,
-      stock_qty: Number(r.stock_qty) || 0
-    }));
+    let launches: any[] = [];
+    try {
+      const [lRows]: any = await pool.query('SELECT * FROM product_stock_launches ORDER BY created_at DESC');
+      launches = lRows;
+    } catch (e) {
+      // Tabela pode estar sendo inicializada
+    }
+    return rows.map((r: any) => {
+      const pLaunches = launches
+        .filter((l: any) => String(l.product_id) === String(r.id))
+        .map((l: any) => ({
+          id: l.id,
+          product_id: l.product_id,
+          quantity: Number(l.quantity) || 0,
+          created_at: l.created_at
+        }));
+      return {
+        ...r,
+        sale_price: Number(r.sale_price) || 0,
+        stock_qty: Number(r.stock_qty) || 0,
+        initial_stock: Number(r.initial_stock) || 0,
+        stock_launches: pLaunches
+      };
+    });
   }
 
   async getProductById(id: string | number): Promise<Product | undefined> {
     if (!pool) {
-      return (this.schema.products || []).find(p => String(p.id) === String(id));
+      const prod = (this.schema.products || []).find(p => String(p.id) === String(id));
+      if (!prod) return undefined;
+      return {
+        ...prod,
+        sale_price: Number(prod.sale_price) || 0,
+        stock_qty: Number(prod.stock_qty) || 0,
+        initial_stock: Number(prod.initial_stock !== undefined ? prod.initial_stock : prod.stock_qty) || 0,
+        stock_launches: prod.stock_launches || []
+      };
     }
     const [rows]: any = await pool.query('SELECT * FROM products WHERE id = ?', [id]);
     if (rows[0]) {
-      rows[0].sale_price = Number(rows[0].sale_price) || 0;
-      rows[0].stock_qty = Number(rows[0].stock_qty) || 0;
+      const r = rows[0];
+      let pLaunches: any[] = [];
+      try {
+        const [lRows]: any = await pool.query('SELECT * FROM product_stock_launches WHERE product_id = ? ORDER BY created_at DESC', [id]);
+        pLaunches = lRows.map((l: any) => ({
+          id: l.id,
+          product_id: l.product_id,
+          quantity: Number(l.quantity) || 0,
+          created_at: l.created_at
+        }));
+      } catch (e) {}
+
+      return {
+        ...r,
+        sale_price: Number(r.sale_price) || 0,
+        stock_qty: Number(r.stock_qty) || 0,
+        initial_stock: Number(r.initial_stock) || 0,
+        stock_launches: pLaunches
+      };
     }
-    return rows[0];
+    return undefined;
   }
 
   async createProduct(product: Omit<Product, 'id'>): Promise<Product> {
+    const qty = Number(product.stock_qty) || 0;
     if (!pool) {
       if (!this.schema.products) this.schema.products = [];
       const id = Date.now() + Math.floor(Math.random() * 100);
@@ -759,21 +835,25 @@ class Database {
         id, 
         name: product.name, 
         sale_price: Number(product.sale_price) || 0, 
-        stock_qty: Number(product.stock_qty) || 0 
+        stock_qty: qty,
+        initial_stock: qty,
+        stock_launches: []
       };
       this.schema.products.push(newProduct);
       this.saveJSON();
       return newProduct;
     }
     const [result]: any = await pool.query(
-      'INSERT INTO products (name, sale_price, stock_qty) VALUES (?, ?, ?)',
-      [product.name, Number(product.sale_price) || 0, Number(product.stock_qty) || 0]
+      'INSERT INTO products (name, sale_price, stock_qty, initial_stock) VALUES (?, ?, ?, ?)',
+      [product.name, Number(product.sale_price) || 0, qty, qty]
     );
     return { 
       id: result.insertId, 
       name: product.name, 
       sale_price: Number(product.sale_price) || 0, 
-      stock_qty: Number(product.stock_qty) || 0 
+      stock_qty: qty,
+      initial_stock: qty,
+      stock_launches: []
     };
   }
 
@@ -782,12 +862,15 @@ class Database {
       if (!this.schema.products) this.schema.products = [];
       const index = this.schema.products.findIndex(p => String(p.id) === String(id));
       if (index === -1) throw new Error("Produto não encontrado.");
+      const existing = this.schema.products[index];
       this.schema.products[index] = {
-        ...this.schema.products[index],
+        ...existing,
         ...updated,
-        sale_price: updated.sale_price !== undefined ? Number(updated.sale_price) : this.schema.products[index].sale_price,
-        stock_qty: updated.stock_qty !== undefined ? Number(updated.stock_qty) : this.schema.products[index].stock_qty,
-        id: this.schema.products[index].id
+        sale_price: updated.sale_price !== undefined ? Number(updated.sale_price) : existing.sale_price,
+        // Ao clicar em editar, o campo de estoque fica cinza (desabilitado) e não pode ser editado pelo formulário principal.
+        // Mas se por acaso enviarem stock_qty, mantemos.
+        stock_qty: updated.stock_qty !== undefined ? Number(updated.stock_qty) : existing.stock_qty,
+        id: existing.id
       };
       this.saveJSON();
       return this.schema.products[index];
@@ -816,8 +899,70 @@ class Database {
       if (deleted) this.saveJSON();
       return deleted;
     }
+    // Deleta os lançamentos associados se houver
+    try {
+      await pool.query('DELETE FROM product_stock_launches WHERE product_id = ?', [id]);
+    } catch (e) {}
     const [result]: any = await pool.query('DELETE FROM products WHERE id = ?', [id]);
     return result.affectedRows > 0;
+  }
+
+  async insertStockLaunch(productId: string | number, quantity: number): Promise<Product> {
+    const qty = Number(quantity) || 0;
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const index = this.schema.products.findIndex(p => String(p.id) === String(productId));
+      if (index === -1) throw new Error("Produto não encontrado.");
+      const prod = this.schema.products[index];
+      if (!prod.stock_launches) prod.stock_launches = [];
+      prod.stock_launches.push({
+        id: Date.now() + Math.floor(Math.random() * 10),
+        product_id: productId,
+        quantity: qty,
+        created_at: new Date().toISOString()
+      });
+      prod.stock_qty = (Number(prod.stock_qty) || 0) + qty;
+      this.saveJSON();
+      return prod;
+    }
+
+    // No MySQL
+    const [rows]: any = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+    if (rows.length === 0) throw new Error("Produto não encontrado.");
+    const prod = rows[0];
+    const newStock = (Number(prod.stock_qty) || 0) + qty;
+    await pool.query('UPDATE products SET stock_qty = ? WHERE id = ?', [newStock, productId]);
+    await pool.query('INSERT INTO product_stock_launches (product_id, quantity) VALUES (?, ?)', [productId, qty]);
+
+    const updatedProd = await this.getProductById(productId);
+    if (!updatedProd) throw new Error("Produto não pôde ser recuperado.");
+    return updatedProd;
+  }
+
+  async deleteInitialStock(productId: string | number): Promise<Product> {
+    if (!pool) {
+      if (!this.schema.products) this.schema.products = [];
+      const index = this.schema.products.findIndex(p => String(p.id) === String(productId));
+      if (index === -1) throw new Error("Produto não encontrado.");
+      const prod = this.schema.products[index];
+      const initial = Number(prod.initial_stock) || 0;
+      prod.stock_qty = Math.max(0, (Number(prod.stock_qty) || 0) - initial);
+      prod.initial_stock = 0;
+      this.saveJSON();
+      return prod;
+    }
+
+    // No MySQL
+    const [rows]: any = await pool.query('SELECT * FROM products WHERE id = ?', [productId]);
+    if (rows.length === 0) throw new Error("Produto não encontrado.");
+    const prod = rows[0];
+    const initial = Number(prod.initial_stock) || 0;
+    const newStock = Math.max(0, (Number(prod.stock_qty) || 0) - initial);
+    await pool.query('UPDATE products SET stock_qty = ?, initial_stock = 0 WHERE id = ?', [newStock, productId]);
+
+    const updatedProd = await this.getProductById(productId);
+    if (!updatedProd) throw new Error("Produto não pôde ser recuperado.");
+    return updatedProd;
   }
 
   async adjustStock(description: string, quantityChange: number): Promise<void> {
