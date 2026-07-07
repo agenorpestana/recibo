@@ -440,7 +440,7 @@ async function startServer() {
     }
   });
 
-  // Busca faturas do Bom Controle por intervalo de data (Estratégia de Varredura / Traversal de IDs)
+  // Busca faturas do Bom Controle por intervalo de data usando o endpoint de pesquisa financeira oficial
   app.get('/api/integration/bom-controle/faturas', async (req, res) => {
     try {
       const settings = await db.getIntegrationSettings();
@@ -449,96 +449,85 @@ async function startServer() {
         return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
       }
 
-      const { dataInicio, dataFim, startId } = req.query;
+      const { dataInicio, dataFim, tipoData, textoPesquisa, idsEmpresa, idsCliente } = req.query;
       if (!dataInicio || !dataFim) {
         return res.status(400).json({ error: 'Os parâmetros dataInicio e dataFim são obrigatórios (formato YYYY-MM-DD).' });
       }
 
-      // Converte as datas recebidas para objetos Date (ignorando fuso horário)
-      const startDateObj = new Date(dataInicio as string + 'T00:00:00');
-      const endDateObj = new Date(dataFim as string + 'T23:59:59');
+      // Prepara os parâmetros conforme exigido pelo Bom Controle:
+      // dataInicio: "aaaa-mm-dd hh24:mi:ss"
+      // dataTermino: "aaaa-mm-dd hh24:mi:ss"
+      // tipoData: Opções como DataPadrao, Criacao, etc.
+      const startFormatted = `${dataInicio} 00:00:00`;
+      const endFormatted = `${dataFim} 23:59:59`;
+      const tipoDataValue = (tipoData as string) || 'DataPadrao';
 
-      // ID de partida para varredura decrescente.
-      let currentId = Number(startId) || 4900;
-      if (currentId <= 0) currentId = 4900;
+      const params = new URLSearchParams();
+      params.append('dataInicio', startFormatted);
+      params.append('dataTermino', endFormatted);
+      params.append('tipoData', tipoDataValue);
 
-      console.log(`[Bom Controle API] Iniciando varredura decrescente a partir do ID ${currentId} para o período de ${dataInicio} a ${dataFim}`);
-
-      const maxScan = 50; // Limite de IDs a varrer em uma única requisição para evitar lentidão
-      const batchSize = 10; // Batching para acelerar a busca concorrentemente
-      let scannedCount = 0;
-      let consecutive404s = 0;
-      let olderThanStartCount = 0;
-      const foundFaturas = [];
-
-      while (scannedCount < maxScan && consecutive404s < 20 && olderThanStartCount < 10 && currentId > 0) {
-        const idsToFetch = [];
-        for (let i = 0; i < batchSize && currentId - i > 0; i++) {
-          idsToFetch.push(currentId - i);
-        }
-
-        if (idsToFetch.length === 0) break;
-
-        // Busca o lote de faturas em paralelo
-        const results = await Promise.all(
-          idsToFetch.map(async (id) => {
-            try {
-              const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/Obter/${id}`, {
-                headers: {
-                  'Authorization': `ApiKey ${apiKey}`
-                }
-              });
-              if (response.status === 404) {
-                return { id, status: 404 };
-              }
-              if (!response.ok) {
-                return { id, status: response.status, error: true };
-              }
-              const data = await response.json();
-              return { id, status: 200, data };
-            } catch (err: any) {
-              return { id, error: true, message: err.message };
-            }
-          })
-        );
-
-        // Processa os resultados de forma ordenada (decrescente)
-        for (const res of results) {
-          if (res.status === 404) {
-            consecutive404s++;
-          } else if (res.status === 200 && res.data) {
-            consecutive404s = 0; // Reseta se encontrar um ID válido
-            const fatura = res.data;
-            const vencimento = fatura.Vencimento || fatura.DataVencimento;
-
-            if (vencimento) {
-              const faturaDate = new Date(vencimento + 'T00:00:00');
-              
-              if (faturaDate >= startDateObj && faturaDate <= endDateObj) {
-                olderThanStartCount = 0; // Reseta se encontrar faturas na faixa ou futura
-                // Enriquecer a fatura com detalhes do cliente e empresa
-                const enriched = await enrichFatura(fatura, apiKey);
-                foundFaturas.push(enriched);
-              } else if (faturaDate < startDateObj) {
-                olderThanStartCount++;
-              } else {
-                olderThanStartCount = 0;
-              }
-            } else {
-              const enriched = await enrichFatura(fatura, apiKey);
-              foundFaturas.push(enriched);
-            }
-          }
-        }
-
-        currentId -= batchSize;
-        scannedCount += batchSize;
+      if (textoPesquisa) {
+        params.append('textoPesquisa', textoPesquisa as string);
+      }
+      if (idsEmpresa) {
+        params.append('idsEmpresa', idsEmpresa as string);
+      }
+      if (idsCliente) {
+        params.append('idsCliente', idsCliente as string);
       }
 
-      console.log(`[Bom Controle API] Varredura concluída. Encontradas ${foundFaturas.length} faturas dentro do período.`);
-      res.json(foundFaturas);
+      // Configura paginação de segurança para trazer até 100 itens por vez
+      params.append('paginacao.itensPorPagina', '100');
+      params.append('paginacao.numeroDaPagina', '1');
+
+      const url = `https://apinewintegracao.bomcontrole.com.br/integracao/Financeiro/Pesquisar?${params.toString()}`;
+      console.log(`[Bom Controle API] Pesquisando financeiro: ${url}`);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
+      }
+
+      const data = await response.json();
+      const itemsList = data.Itens || [];
+
+      console.log(`[Bom Controle API] Pesquisa financeira retornou ${itemsList.length} itens.`);
+
+      // Mapeia os itens (parcelas financeiras) para o formato esperado pelo frontend
+      const faturas = itemsList.map((item: any) => {
+        return {
+          Id: item.IdFatura || item.IdMovimentacaoFinanceiraParcela, // Prefere o ID da Fatura para poder buscar o Obter completo
+          IdFatura: item.IdFatura,
+          IdMovimentacaoFinanceiraParcela: item.IdMovimentacaoFinanceiraParcela,
+          NomeCliente: item.NomeClienteFornecedor || item.Nome,
+          Cliente: {
+            Id: item.IdCliente,
+            Nome: item.NomeClienteFornecedor || 'Cliente Não Informado',
+            CnpjCpf: item.DocumentoClienteFornecedor || 'N/A',
+            Celular: '' // Será populado quando o usuário clicar em "Selecionar" e chamarmos o Obter
+          },
+          Quitada: !!item.DataQuitacao,
+          Vencimento: item.DataVencimento,
+          Valor: item.Valor,
+          FormaPagamento: item.NomeFormaPagamento || 'Boleto Bancário',
+          LinkBoleto: item.LinkBoletoBancario,
+          NomeMovimentacao: item.Nome,
+          IdEmpresa: item.IdEmpresa,
+          NomeEmpresa: item.NomeEmpresa
+        };
+      });
+
+      res.json(faturas);
     } catch (e: any) {
-      res.status(500).json({ error: e.message || 'Erro ao varrer faturas por período.' });
+      res.status(500).json({ error: e.message || 'Erro ao pesquisar faturas por período no Bom Controle.' });
     }
   });
 

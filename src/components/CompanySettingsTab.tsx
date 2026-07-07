@@ -66,6 +66,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
     return `${yyyy}-${mm}-${dd}`;
   });
   const [startId, setStartId] = useState('4900');
+  const [tipoData, setTipoData] = useState('DataPadrao');
+  const [textoPesquisa, setTextoPesquisa] = useState('');
   const [faturasList, setFaturasList] = useState<any[] | null>(null);
   const [faturasListLoading, setFaturasListLoading] = useState(false);
   const [faturasListError, setFaturasListError] = useState<string | null>(null);
@@ -147,7 +149,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setFaturasListError(null);
       setFaturasList(null);
       
-      const res = await fetch(`/api/integration/bom-controle/faturas?dataInicio=${startDate}&dataFim=${endDate}&startId=${startId}`);
+      const endpoint = `/api/integration/bom-controle/faturas?dataInicio=${startDate}&dataFim=${endDate}&tipoData=${tipoData}&textoPesquisa=${encodeURIComponent(textoPesquisa)}`;
+      const res = await fetch(endpoint);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Erro ao buscar faturas (${res.status})`);
@@ -998,7 +1001,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   </div>
                 ) : (
                   <div className="space-y-3 bg-gray-50/50 p-3 rounded-lg border border-gray-150">
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Data Início</label>
                         <input
@@ -1018,16 +1021,34 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">ID de Partida</label>
-                        <input
-                          type="number"
-                          value={startId}
-                          onChange={(e) => setStartId(e.target.value)}
-                          placeholder="Ex: 4900"
-                          className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none font-mono"
-                        />
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Tipo de Data</label>
+                        <select
+                          value={tipoData}
+                          onChange={(e) => setTipoData(e.target.value)}
+                          className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none font-bold"
+                        >
+                          <option value="DataPadrao">Vencimento (Padrão)</option>
+                          <option value="Criacao">Criação / Cadastro</option>
+                          <option value="DataPagamento">Quitação / Pagamento</option>
+                          <option value="DataCompetencia">Competência</option>
+                          <option value="DataConciliacao">Conciliação</option>
+                          <option value="DataPrevista">Previsão</option>
+                          <option value="UltimaAlteracao">Última Alteração</option>
+                        </select>
                       </div>
                     </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Termo de Busca (Opcional)</label>
+                      <input
+                        type="text"
+                        value={textoPesquisa}
+                        onChange={(e) => setTextoPesquisa(e.target.value)}
+                        placeholder="Pesquise por nome do cliente, descrição ou parcela..."
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
                     <button
                       onClick={handleSearchFaturasByPeriod}
                       disabled={faturasListLoading}
@@ -1094,11 +1115,23 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                     {f.Quitada ? 'Quitada' : 'Pendente'}
                                   </span>
                                 </div>
-                                <div className="flex gap-4 text-[10px] text-gray-400 font-mono">
+                                <div className="flex gap-4 items-center text-[10px] text-gray-400 font-mono">
                                   <span>Venc: {f.Vencimento ? new Date(f.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}</span>
                                   <span className="font-bold text-indigo-600">
                                     {f.Valor !== undefined ? `R$ ${Number(f.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'R$ 0,00'}
                                   </span>
+                                  {f.LinkBoleto && (
+                                    <a
+                                      href={f.LinkBoleto}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-red-500 hover:text-red-700 font-bold flex items-center gap-0.5 hover:underline"
+                                      title="Visualizar Boleto"
+                                    >
+                                      <FileText className="h-3.5 w-3.5" />
+                                      PDF do Boleto
+                                    </a>
+                                  )}
                                 </div>
                               </div>
                               <button
