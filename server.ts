@@ -342,6 +342,77 @@ async function startServer() {
   });
 
   // Busca fatura do Bom Controle
+  // Helper para enriquecer fatura com dados do Cliente e Empresa do Bom Controle
+  async function enrichFatura(fatura: any, apiKey: string) {
+    if (!fatura) return fatura;
+
+    // 1. Identificar ID do Cliente
+    let idCliente = fatura.IdCliente || fatura.ClienteId || fatura.idCliente || fatura.IdSacado;
+    if (!idCliente && fatura.Cliente && typeof fatura.Cliente === 'object') {
+      idCliente = fatura.Cliente.Id || fatura.Cliente.id;
+    }
+
+    if (idCliente) {
+      try {
+        console.log(`[Bom Controle API] Buscando dados do cliente #${idCliente} para a fatura #${fatura.Id}`);
+        const clientResponse = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Cliente/Obter/${idCliente}`, {
+          headers: {
+            'Authorization': `ApiKey ${apiKey}`
+          }
+        });
+        if (clientResponse.ok) {
+          const clientData = await clientResponse.json();
+          const clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia;
+          const clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf;
+          const clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+          
+          fatura.Cliente = {
+            Id: idCliente,
+            Nome: clientName || fatura.Cliente?.Nome || 'Cliente Não Informado',
+            CnpjCpf: clientDoc || fatura.Cliente?.CnpjCpf || 'N/A',
+            Celular: clientCel || fatura.Cliente?.Celular || '',
+            ...clientData
+          };
+        }
+      } catch (err) {
+        console.error(`[Bom Controle API] Erro ao buscar dados do cliente #${idCliente}:`, err);
+      }
+    }
+
+    // 2. Identificar ID da Empresa
+    let idEmpresa = fatura.IdEmpresa || fatura.EmpresaId || fatura.idEmpresa;
+    if (!idEmpresa && fatura.Empresa && typeof fatura.Empresa === 'object') {
+      idEmpresa = fatura.Empresa.Id || fatura.Empresa.id;
+    }
+
+    if (idEmpresa) {
+      try {
+        console.log(`[Bom Controle API] Buscando dados da empresa #${idEmpresa} para a fatura #${fatura.Id}`);
+        const companyResponse = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Empresa/Pesquisar?pesquisa=${idEmpresa}`, {
+          headers: {
+            'Authorization': `ApiKey ${apiKey}`
+          }
+        });
+        if (companyResponse.ok) {
+          const companies = await companyResponse.json();
+          if (Array.isArray(companies) && companies.length > 0) {
+            const matchedCompany = companies.find((c: any) => String(c.Id) === String(idEmpresa)) || companies[0];
+            fatura.Empresa = {
+              Id: idEmpresa,
+              Nome: matchedCompany.Nome || matchedCompany.RazaoSocial || 'Empresa Não Informada',
+              Cnpj: matchedCompany.Cnpj || matchedCompany.CnpjCpf || 'N/A',
+              ...matchedCompany
+            };
+          }
+        }
+      } catch (err) {
+        console.error(`[Bom Controle API] Erro ao buscar dados da empresa #${idEmpresa}:`, err);
+      }
+    }
+
+    return fatura;
+  }
+
   app.get('/api/integration/bom-controle/fatura/:id', async (req, res) => {
     try {
       const settings = await db.getIntegrationSettings();
@@ -360,13 +431,16 @@ async function startServer() {
         return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
       }
       const data = await response.json();
-      res.json(data);
+      
+      // Enriquecer com dados do cliente e da empresa
+      const enriched = await enrichFatura(data, apiKey);
+      res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao obter fatura do Bom Controle.' });
     }
   });
 
-  // Busca faturas do Bom Controle por intervalo de data (ListarPorPeriodo)
+  // Busca faturas do Bom Controle por intervalo de data (Estratégia de Varredura / Traversal de IDs)
   app.get('/api/integration/bom-controle/faturas', async (req, res) => {
     try {
       const settings = await db.getIntegrationSettings();
@@ -375,39 +449,177 @@ async function startServer() {
         return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
       }
 
-      const { dataInicio, dataFim } = req.query;
+      const { dataInicio, dataFim, startId } = req.query;
       if (!dataInicio || !dataFim) {
         return res.status(400).json({ error: 'Os parâmetros dataInicio e dataFim são obrigatórios (formato YYYY-MM-DD).' });
       }
 
-      // Prepara os parâmetros usando múltiplos nomes comuns para garantir compatibilidade
-      const params = new URLSearchParams();
-      params.append('dataInicio', dataInicio as string);
-      params.append('dataFim', dataFim as string);
-      params.append('dataInicial', dataInicio as string);
-      params.append('dataFinal', dataFim as string);
-      params.append('inicio', dataInicio as string);
-      params.append('fim', dataFim as string);
+      // Converte as datas recebidas para objetos Date (ignorando fuso horário)
+      const startDateObj = new Date(dataInicio as string + 'T00:00:00');
+      const endDateObj = new Date(dataFim as string + 'T23:59:59');
 
-      const url = `https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/ListarPorPeriodo?${params.toString()}`;
-      console.log(`[Bom Controle API] Requisitando período: ${url}`);
+      // ID de partida para varredura decrescente.
+      let currentId = Number(startId) || 4900;
+      if (currentId <= 0) currentId = 4900;
 
-      const response = await fetch(url, {
+      console.log(`[Bom Controle API] Iniciando varredura decrescente a partir do ID ${currentId} para o período de ${dataInicio} a ${dataFim}`);
+
+      const maxScan = 50; // Limite de IDs a varrer em uma única requisição para evitar lentidão
+      const batchSize = 10; // Batching para acelerar a busca concorrentemente
+      let scannedCount = 0;
+      let consecutive404s = 0;
+      let olderThanStartCount = 0;
+      const foundFaturas = [];
+
+      while (scannedCount < maxScan && consecutive404s < 20 && olderThanStartCount < 10 && currentId > 0) {
+        const idsToFetch = [];
+        for (let i = 0; i < batchSize && currentId - i > 0; i++) {
+          idsToFetch.push(currentId - i);
+        }
+
+        if (idsToFetch.length === 0) break;
+
+        // Busca o lote de faturas em paralelo
+        const results = await Promise.all(
+          idsToFetch.map(async (id) => {
+            try {
+              const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/Obter/${id}`, {
+                headers: {
+                  'Authorization': `ApiKey ${apiKey}`
+                }
+              });
+              if (response.status === 404) {
+                return { id, status: 404 };
+              }
+              if (!response.ok) {
+                return { id, status: response.status, error: true };
+              }
+              const data = await response.json();
+              return { id, status: 200, data };
+            } catch (err: any) {
+              return { id, error: true, message: err.message };
+            }
+          })
+        );
+
+        // Processa os resultados de forma ordenada (decrescente)
+        for (const res of results) {
+          if (res.status === 404) {
+            consecutive404s++;
+          } else if (res.status === 200 && res.data) {
+            consecutive404s = 0; // Reseta se encontrar um ID válido
+            const fatura = res.data;
+            const vencimento = fatura.Vencimento || fatura.DataVencimento;
+
+            if (vencimento) {
+              const faturaDate = new Date(vencimento + 'T00:00:00');
+              
+              if (faturaDate >= startDateObj && faturaDate <= endDateObj) {
+                olderThanStartCount = 0; // Reseta se encontrar faturas na faixa ou futura
+                // Enriquecer a fatura com detalhes do cliente e empresa
+                const enriched = await enrichFatura(fatura, apiKey);
+                foundFaturas.push(enriched);
+              } else if (faturaDate < startDateObj) {
+                olderThanStartCount++;
+              } else {
+                olderThanStartCount = 0;
+              }
+            } else {
+              const enriched = await enrichFatura(fatura, apiKey);
+              foundFaturas.push(enriched);
+            }
+          }
+        }
+
+        currentId -= batchSize;
+        scannedCount += batchSize;
+      }
+
+      console.log(`[Bom Controle API] Varredura concluída. Encontradas ${foundFaturas.length} faturas dentro do período.`);
+      res.json(foundFaturas);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao varrer faturas por período.' });
+    }
+  });
+
+  // Obtém dados de um cliente específico no Bom Controle por ID
+  app.get('/api/integration/bom-controle/cliente/:id', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+      const id = req.params.id;
+      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Cliente/Obter/${id}`, {
         headers: {
-          'Authorization': `ApiKey ${apiKey}`,
-          'Accept': 'application/json'
+          'Authorization': `ApiKey ${apiKey}`
         }
       });
-
       if (!response.ok) {
         const errorText = await response.text();
         return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
       }
-
       const data = await response.json();
       res.json(data);
     } catch (e: any) {
-      res.status(500).json({ error: e.message || 'Erro ao buscar faturas por período no Bom Controle.' });
+      res.status(500).json({ error: e.message || 'Erro ao obter cliente do Bom Controle.' });
+    }
+  });
+
+  // Pesquisa clientes no Bom Controle por termo (Nome ou CPF/CNPJ)
+  app.get('/api/integration/bom-controle/clientes/pesquisar', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+      const { pesquisa } = req.query;
+      if (!pesquisa) {
+        return res.status(400).json({ error: 'O parâmetro pesquisa é obrigatório.' });
+      }
+      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Cliente/Pesquisar?pesquisa=${encodeURIComponent(pesquisa as string)}`, {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao pesquisar clientes no Bom Controle.' });
+    }
+  });
+
+  // Pesquisa empresas no Bom Controle por termo
+  app.get('/api/integration/bom-controle/empresas/pesquisar', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+      const { pesquisa } = req.query;
+      if (!pesquisa) {
+        return res.status(400).json({ error: 'O parâmetro pesquisa é obrigatório.' });
+      }
+      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Empresa/Pesquisar?pesquisa=${encodeURIComponent(pesquisa as string)}`, {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao pesquisar empresas no Bom Controle.' });
     }
   });
 
