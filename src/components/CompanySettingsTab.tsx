@@ -68,6 +68,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [startId, setStartId] = useState('4900');
   const [tipoData, setTipoData] = useState('DataPadrao');
   const [textoPesquisa, setTextoPesquisa] = useState('');
+  const [empresaId, setEmpresaId] = useState('');
   const [faturasList, setFaturasList] = useState<any[] | null>(null);
   const [faturasListLoading, setFaturasListLoading] = useState(false);
   const [faturasListError, setFaturasListError] = useState<string | null>(null);
@@ -149,7 +150,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setFaturasListError(null);
       setFaturasList(null);
       
-      const endpoint = `/api/integration/bom-controle/faturas?dataInicio=${startDate}&dataFim=${endDate}&tipoData=${tipoData}&textoPesquisa=${encodeURIComponent(textoPesquisa)}`;
+      const endpoint = `/api/integration/bom-controle/faturas?dataInicio=${startDate}&dataFim=${endDate}&tipoData=${tipoData}&textoPesquisa=${encodeURIComponent(textoPesquisa)}${empresaId ? `&idsEmpresa=${empresaId}` : ''}`;
       const res = await fetch(endpoint);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -181,10 +182,11 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
       
+      const rawVencimento = data.Vencimento || data.DataVencimento;
       let vencimento = 'N/A';
-      if (data.Vencimento) {
+      if (rawVencimento) {
         try {
-          const date = new Date(data.Vencimento);
+          const date = new Date(rawVencimento);
           vencimento = date.toLocaleDateString('pt-BR');
         } catch (e) {}
       }
@@ -198,8 +200,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       setWhatsAppMessage(msg);
 
-      if (data.Cliente?.Celular) {
-        let phone = data.Cliente.Celular;
+      const rootPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+      if (rootPhone) {
+        let phone = rootPhone;
         phone = phone.replace(/\D/g, '');
         if (phone.length > 0 && !phone.startsWith('55')) {
           phone = '55' + phone;
@@ -278,10 +281,11 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
       
+      const rawVencimento = data.Vencimento || data.DataVencimento;
       let vencimento = 'N/A';
-      if (data.Vencimento) {
+      if (rawVencimento) {
         try {
-          const date = new Date(data.Vencimento);
+          const date = new Date(rawVencimento);
           vencimento = date.toLocaleDateString('pt-BR');
         } catch (e) {}
       }
@@ -295,8 +299,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       setWhatsAppMessage(msg);
 
-      if (data.Cliente?.Celular) {
-        let phone = data.Cliente.Celular;
+      const rootPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+      if (rootPhone) {
+        let phone = rootPhone;
         phone = phone.replace(/\D/g, '');
         if (phone.length > 0 && !phone.startsWith('55')) {
           phone = '55' + phone;
@@ -1001,7 +1006,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   </div>
                 ) : (
                   <div className="space-y-3 bg-gray-50/50 p-3 rounded-lg border border-gray-150">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       <div>
                         <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Data Início</label>
                         <input
@@ -1034,6 +1039,18 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                           <option value="DataConciliacao">Conciliação</option>
                           <option value="DataPrevista">Previsão</option>
                           <option value="UltimaAlteracao">Última Alteração</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Empresa</label>
+                        <select
+                          value={empresaId}
+                          onChange={(e) => setEmpresaId(e.target.value)}
+                          className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none font-bold"
+                        >
+                          <option value="">Todas as Empresas</option>
+                          <option value="1">Empresa 1 (ID 1)</option>
+                          <option value="2">Empresa 2 (ID 2)</option>
                         </select>
                       </div>
                     </div>
@@ -1429,6 +1446,80 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
                       />
                       <span className="block text-[10px] text-gray-400">Certifique-se de usar o prefixo do país (55 para Brasil).</span>
+                      
+                      {/* Seleção rápida de contatos cadastrados no Bom Controle */}
+                      {(() => {
+                        const phones: { label: string; number: string; type: string }[] = [];
+                        const rootPhone = fetchedFatura.Cliente?.Celular || fetchedFatura.Cliente?.Telefone || fetchedFatura.Cliente?.CelularWhatsApp;
+                        
+                        if (rootPhone) {
+                          phones.push({
+                            label: fetchedFatura.Cliente?.Nome || 'Cadastro Principal',
+                            number: rootPhone,
+                            type: 'Principal'
+                          });
+                        }
+
+                        if (Array.isArray(fetchedFatura.Cliente?.Contatos)) {
+                          fetchedFatura.Cliente.Contatos.forEach((contato: any) => {
+                            const cPhone = contato.Telefone || contato.Celular;
+                            if (cPhone) {
+                              const rawPhone = cPhone.replace(/\D/g, '');
+                              const isDup = phones.some(p => p.number.replace(/\D/g, '') === rawPhone);
+                              if (!isDup) {
+                                let typeLabel = 'Contato';
+                                if (contato.Padrao && contato.Cobranca) typeLabel = 'Padrão e Cobrança';
+                                else if (contato.Padrao) typeLabel = 'Padrão';
+                                else if (contato.Cobranca) typeLabel = 'Cobrança';
+                                
+                                phones.push({
+                                  label: contato.Nome || 'Sem Nome',
+                                  number: cPhone,
+                                  type: typeLabel
+                                });
+                              }
+                            }
+                          });
+                        }
+
+                        if (phones.length === 0) return null;
+
+                        return (
+                          <div className="bg-indigo-50/20 p-2 rounded-lg border border-indigo-100 space-y-1.5 mt-2">
+                            <span className="block text-[9px] font-bold text-indigo-800 uppercase tracking-wider">
+                              Contatos do Cliente (Bom Controle) - Toque para usar:
+                            </span>
+                            <div className="grid grid-cols-1 gap-1.5 max-h-[120px] overflow-y-auto pr-1">
+                              {phones.map((p, idx) => (
+                                <div key={idx} className="flex items-center justify-between gap-3 p-1.5 bg-white border border-gray-100 rounded-md text-xs">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-bold text-gray-700 truncate">{p.label}</span>
+                                      <span className="text-[8px] font-bold bg-indigo-50 text-indigo-750 px-1 py-0.2 rounded">
+                                        {p.type}
+                                      </span>
+                                    </div>
+                                    <span className="font-mono text-[9px] text-gray-500">{p.number}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      let cleanPhone = p.number.replace(/\D/g, '');
+                                      if (cleanPhone.length > 0 && !cleanPhone.startsWith('55')) {
+                                        cleanPhone = '55' + cleanPhone;
+                                      }
+                                      setWhatsAppNumber(cleanPhone);
+                                    }}
+                                    className="px-2 py-0.5 text-[9px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white rounded border border-emerald-150 transition-colors shrink-0"
+                                  >
+                                    Usar Número
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Mensagem Modificada */}
