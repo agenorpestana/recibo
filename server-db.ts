@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
-import { Client, Document, CompanySettings, User, DocumentType, DocumentStatus, FinancialStats, Product } from './src/types';
+import { Client, Document, CompanySettings, User, DocumentType, DocumentStatus, FinancialStats, Product, IntegrationSettings } from './src/types';
 
 // O banco de dados local será salvo neste arquivo JSON caso o MySQL não esteja ativo.
 const DB_FILE_PATH = path.join(process.cwd(), 'data', 'db.json');
@@ -22,6 +22,7 @@ interface DatabaseSchema {
   settings: CompanySettings;
   companies?: (CompanySettings & { id: number })[];
   products?: Product[];
+  integration_settings?: IntegrationSettings;
 }
 
 // Configurações padrão corporativas
@@ -35,6 +36,13 @@ const defaultSettings: CompanySettings = {
   logo_base64: null,
   notes_recibo_default: '- Garantia do Serviço 30 dias\n- Garantia de Peças 06 Meses\n- Garantia de Máquina Fechada e 01 Ano\n- Equipamento com mais de 60 dias sem o cliente vir buscar caracteriza abandono, sendo assim será vendido para ressarcir os danos com peças e mão de obra.',
   notes_orcamento_default: 'Este orçamento tem validade de 10 dias corridos a partir da data de emissão. Valores sujeitos a reajuste conforme estoque de insumos e peças de mercado.'
+};
+
+const defaultIntegrationSettings: IntegrationSettings = {
+  bom_controle_api_key: '',
+  whaticket_api_token: '',
+  whaticket_api_url: 'https://apichat.unityautomacoes.com.br',
+  whaticket_default_message: 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}'
 };
 
 const defaultUsers: User[] = [
@@ -73,7 +81,8 @@ class Database {
     documents: [],
     settings: { ...defaultSettings },
     companies: [{ ...defaultSettings, id: 1 }],
-    products: []
+    products: [],
+    integration_settings: { ...defaultIntegrationSettings }
   };
 
   constructor() {
@@ -160,6 +169,38 @@ class Database {
       } catch (err) {
         // Ignora se a coluna já existia
       }
+
+      // Cria a tabela de configurações de integração com o Bom Controle / Whaticket
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS integration_settings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            bom_controle_api_key TEXT DEFAULT NULL,
+            whaticket_api_token TEXT DEFAULT NULL,
+            whaticket_api_url VARCHAR(255) DEFAULT 'https://apichat.unityautomacoes.com.br',
+            whaticket_default_message TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('[Database Migration] Tabela "integration_settings" criada ou validada.');
+
+        const [rows]: any = await pool.query('SELECT COUNT(*) as count FROM integration_settings');
+        if (rows[0]?.count === 0) {
+          await pool.query(`
+            INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message)
+            VALUES (?, ?, ?, ?)
+          `, [
+            defaultIntegrationSettings.bom_controle_api_key,
+            defaultIntegrationSettings.whaticket_api_token,
+            defaultIntegrationSettings.whaticket_api_url,
+            defaultIntegrationSettings.whaticket_default_message
+          ]);
+          console.log('[Database Migration] Registro padrão inserido em "integration_settings".');
+        }
+      } catch (err) {
+        console.error('[Database Migration] Erro ao criar ou inicializar "integration_settings":', err);
+      }
     } catch (e) {
       console.error('[Database Migration] Erro inesperado ao migrar tabela:', e);
     }
@@ -178,7 +219,8 @@ class Database {
           documents: parsed.documents || [],
           settings: parsed.settings || { ...defaultSettings },
           companies: parsed.companies || [{ ...(parsed.settings || defaultSettings), id: 1 }],
-          products: parsed.products || []
+          products: parsed.products || [],
+          integration_settings: parsed.integration_settings || { ...defaultIntegrationSettings }
         };
         // Garante que o administrador padrão exista
         const hasAdmin = this.schema.users.some(u => u.email === 'suporte@unityautomacoes.com.br');
@@ -287,6 +329,78 @@ class Database {
       return settings;
     } catch (error) {
       console.error('Erro ao salvar company_settings no MySQL:', error);
+      throw error;
+    }
+  }
+
+  // --- CONFIGURAÇÕES DE INTEGRAÇÃO ---
+
+  async getIntegrationSettings(): Promise<IntegrationSettings> {
+    if (!pool) {
+      if (!this.schema.integration_settings) {
+        this.schema.integration_settings = { ...defaultIntegrationSettings };
+      }
+      return this.schema.integration_settings;
+    }
+    try {
+      const [rows]: any = await pool.query('SELECT * FROM integration_settings LIMIT 1');
+      if (rows.length === 0) {
+        await pool.query(
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message) VALUES (?, ?, ?, ?)',
+          [
+            defaultIntegrationSettings.bom_controle_api_key,
+            defaultIntegrationSettings.whaticket_api_token,
+            defaultIntegrationSettings.whaticket_api_url,
+            defaultIntegrationSettings.whaticket_default_message
+          ]
+        );
+        return { ...defaultIntegrationSettings };
+      }
+      return {
+        bom_controle_api_key: rows[0].bom_controle_api_key || '',
+        whaticket_api_token: rows[0].whaticket_api_token || '',
+        whaticket_api_url: rows[0].whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+        whaticket_default_message: rows[0].whaticket_default_message || ''
+      };
+    } catch (error) {
+      console.error('Erro ao obter integration_settings no MySQL:', error);
+      return { ...defaultIntegrationSettings };
+    }
+  }
+
+  async updateIntegrationSettings(settings: IntegrationSettings): Promise<IntegrationSettings> {
+    if (!pool) {
+      this.schema.integration_settings = { ...settings };
+      this.saveJSON();
+      return this.schema.integration_settings;
+    }
+    try {
+      const [rows]: any = await pool.query('SELECT id FROM integration_settings LIMIT 1');
+      if (rows.length === 0) {
+        await pool.query(
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message) VALUES (?, ?, ?, ?)',
+          [
+            settings.bom_controle_api_key || '',
+            settings.whaticket_api_token || '',
+            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+            settings.whaticket_default_message || ''
+          ]
+        );
+      } else {
+        await pool.query(
+          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=? WHERE id=?',
+          [
+            settings.bom_controle_api_key || '',
+            settings.whaticket_api_token || '',
+            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+            settings.whaticket_default_message || '',
+            rows[0].id
+          ]
+        );
+      }
+      return settings;
+    } catch (error) {
+      console.error('Erro ao salvar integration_settings no MySQL:', error);
       throw error;
     }
   }

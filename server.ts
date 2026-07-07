@@ -322,6 +322,140 @@ async function startServer() {
     }
   });
 
+  // 5.1. Configurações de Integração (Bom Controle & Whaticket)
+  app.get('/api/integration/settings', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      res.json(settings);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao carregar configurações de integração.' });
+    }
+  });
+
+  app.put('/api/integration/settings', async (req, res) => {
+    try {
+      const settings = await db.updateIntegrationSettings(req.body);
+      res.json(settings);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao salvar configurações de integração.' });
+    }
+  });
+
+  // Busca fatura do Bom Controle
+  app.get('/api/integration/bom-controle/fatura/:id', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+      const id = req.params.id;
+      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/Obter/${id}`, {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao obter fatura do Bom Controle.' });
+    }
+  });
+
+  // Envia mensagem via Whaticket
+  app.post('/api/integration/whaticket/send', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const token = settings.whaticket_api_token;
+      const baseUrl = settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br';
+      if (!token) {
+        return res.status(400).json({ error: 'Token do Whaticket não configurado.' });
+      }
+
+      const { number, body, pdfUrl } = req.body;
+      if (!number) {
+        return res.status(400).json({ error: 'Número de telefone obrigatório.' });
+      }
+
+      const cleanNumber = number.replace(/\D/g, '');
+
+      // Se houver pdfUrl, tentamos baixar e enviar como mídia no Whaticket
+      if (pdfUrl) {
+        try {
+          console.log(`[Whaticket Proxy] Buscando PDF do boleto em: ${pdfUrl}`);
+          const pdfResponse = await fetch(pdfUrl);
+          if (pdfResponse.ok) {
+            const arrayBuffer = await pdfResponse.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+
+            if ((globalThis as any).FormData && (globalThis as any).Blob) {
+              const form = new (globalThis as any).FormData();
+              form.append('number', cleanNumber);
+              form.append('body', body || 'Segue o seu boleto.');
+
+              const blob = new (globalThis as any).Blob([buffer], { type: 'application/pdf' });
+              form.append('medias', blob, `boleto_${Date.now()}.pdf`);
+              form.append('sendSignature', 'false');
+              form.append('closeTicket', 'false');
+
+              console.log(`[Whaticket Proxy] Enviando mídia para o Whaticket: ${baseUrl}/api/messages/send`);
+              const sendResponse = await fetch(`${baseUrl}/api/messages/send`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                },
+                body: form
+              });
+
+              if (sendResponse.ok) {
+                const result = await sendResponse.json();
+                return res.json({ success: true, result });
+              } else {
+                const errText = await sendResponse.text();
+                console.error(`[Whaticket Proxy] Falha no Whaticket API Mídia: ${sendResponse.status} - ${errText}`);
+              }
+            }
+          }
+        } catch (mediaError) {
+          console.error('[Whaticket Proxy] Erro ao enviar como mídia, enviando apenas texto:', mediaError);
+        }
+      }
+
+      // Envia apenas texto (padrão)
+      console.log(`[Whaticket Proxy] Enviando mensagem de texto para: ${cleanNumber}`);
+      const textResponse = await fetch(`${baseUrl}/api/messages/send/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          delay: 1000,
+          messages: [
+            {
+              number: cleanNumber,
+              body: body
+            }
+          ]
+        })
+      });
+
+      if (!textResponse.ok) {
+        const errText = await textResponse.text();
+        return res.status(textResponse.status).json({ error: `Falha no Whaticket API: ${textResponse.status} - ${errText}` });
+      }
+
+      const result = await textResponse.json();
+      res.json({ success: true, result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao enviar mensagem via Whaticket.' });
+    }
+  });
+
   // 5.5. CRUD Outras Empresas
   app.get('/api/companies', async (req, res) => {
     try {

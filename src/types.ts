@@ -99,3 +99,11 @@ export interface Product {
   updated_at?: string;
 }
 
+export interface IntegrationSettings {
+  bom_controle_api_key: string;
+  whaticket_api_token: string;
+  whaticket_api_url: string;
+  whaticket_default_message: string;
+}
+
+

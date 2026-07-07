@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { CompanySettings } from '../types';
-import { Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, HelpCircle, Plus, Trash2, Building } from 'lucide-react';
+import { CompanySettings, IntegrationSettings } from '../types';
+import { 
+  Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
+  HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
+  Search, FileText, Send, Key, RefreshCw, AlertCircle, ExternalLink, 
+  Lock, Settings2, BookOpen, CheckCircle, Smartphone 
+} from 'lucide-react';
 
 interface CompanySettingsTabProps {
   settings: CompanySettings;
@@ -26,6 +31,164 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // --- ESTADOS E MÉTODOS PARA INTEGRAÇÃO BOM CONTROLE & WHATICKET ---
+  const [activeSubTab, setActiveSubTab] = useState<'cadastro' | 'boleto_api'>('cadastro');
+
+  const [integrationSettings, setIntegrationSettings] = useState<IntegrationSettings>({
+    bom_controle_api_key: '',
+    whaticket_api_token: '',
+    whaticket_api_url: 'https://apichat.unityautomacoes.com.br',
+    whaticket_default_message: 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}'
+  });
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationSuccess, setIntegrationSuccess] = useState<string | null>(null);
+  const [integrationError, setIntegrationError] = useState<string | null>(null);
+
+  const [testFaturaId, setTestFaturaId] = useState('');
+  const [faturaLoading, setFaturaLoading] = useState(false);
+  const [fetchedFatura, setFetchedFatura] = useState<any | null>(null);
+  const [faturaError, setFaturaError] = useState<string | null>(null);
+
+  const [whatsAppNumber, setWhatsAppNumber] = useState('');
+  const [whatsAppMessage, setWhatsAppMessage] = useState('');
+  const [sendLoading, setSendLoading] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  const fetchIntegrationSettings = async () => {
+    try {
+      setIntegrationLoading(true);
+      setIntegrationError(null);
+      const res = await fetch('/api/integration/settings');
+      if (!res.ok) throw new Error('Falha ao carregar configurações de integração.');
+      const data = await res.json();
+      setIntegrationSettings(data);
+    } catch (err: any) {
+      setIntegrationError(err.message || 'Erro ao carregar configurações de integração.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const saveIntegrationSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIntegrationLoading(true);
+      setIntegrationSuccess(null);
+      setIntegrationError(null);
+      const res = await fetch('/api/integration/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(integrationSettings)
+      });
+      if (!res.ok) throw new Error('Falha ao salvar configurações de integração.');
+      const data = await res.json();
+      setIntegrationSettings(data);
+      setIntegrationSuccess('Configurações salvas com sucesso!');
+      setTimeout(() => setIntegrationSuccess(null), 3000);
+    } catch (err: any) {
+      setIntegrationError(err.message || 'Erro ao salvar configurações.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  const handleSearchFatura = async () => {
+    if (!testFaturaId) {
+      setFaturaError('Por favor, informe o ID da fatura.');
+      return;
+    }
+    try {
+      setFaturaLoading(true);
+      setFaturaError(null);
+      setFetchedFatura(null);
+      const res = await fetch(`/api/integration/bom-controle/fatura/${testFaturaId}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Fatura não encontrada ou erro ${res.status}`);
+      }
+      const data = await res.json();
+      setFetchedFatura(data);
+
+      const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+      
+      let vencimento = 'N/A';
+      if (data.Vencimento) {
+        try {
+          const date = new Date(data.Vencimento);
+          vencimento = date.toLocaleDateString('pt-BR');
+        } catch (e) {}
+      }
+
+      const link = data.LinkBoleto || '';
+
+      let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+      msg = msg.replace('{valor}', valor)
+               .replace('{vencimento}', vencimento)
+               .replace('{link_boleto}', link);
+
+      setWhatsAppMessage(msg);
+
+      if (data.Cliente?.Celular) {
+        let phone = data.Cliente.Celular;
+        phone = phone.replace(/\D/g, '');
+        if (phone.length > 0 && !phone.startsWith('55')) {
+          phone = '55' + phone;
+        }
+        setWhatsAppNumber(phone);
+      } else {
+        setWhatsAppNumber('55');
+      }
+
+    } catch (err: any) {
+      setFaturaError(err.message || 'Erro ao buscar fatura.');
+    } finally {
+      setFaturaLoading(false);
+    }
+  };
+
+  const handleSendWhatsApp = async (sendAsMedia: boolean) => {
+    if (!whatsAppNumber || whatsAppNumber === '55') {
+      setSendError('Por favor, digite um número de telefone válido.');
+      return;
+    }
+    try {
+      setSendLoading(true);
+      setSendError(null);
+      setSendSuccess(null);
+
+      const payload = {
+        number: whatsAppNumber,
+        body: whatsAppMessage,
+        pdfUrl: sendAsMedia ? fetchedFatura?.LinkBoleto : undefined
+      };
+
+      const res = await fetch('/api/integration/whaticket/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Erro ao enviar mensagem.');
+      }
+
+      setSendSuccess('Mensagem enviada com sucesso para o Whaticket!');
+      setTimeout(() => setSendSuccess(null), 3000);
+    } catch (err: any) {
+      setSendError(err.message || 'Erro ao enviar mensagem.');
+    } finally {
+      setSendLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'boleto_api') {
+      fetchIntegrationSettings();
+    }
+  }, [activeSubTab]);
 
   // Carrega lista de empresas do servidor
   const fetchCompanies = async (selectId?: number) => {
@@ -198,27 +361,57 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
-      <div className="border-b border-gray-100 pb-4">
-        <h2 className="text-xl font-bold text-gray-850">Cadastro e Perfis de Empresas</h2>
-        <p className="text-xs text-gray-500 font-sans">
-          Cadastre e gerencie múltiplas empresas para emitir seus Orçamentos e Recibos com logotipos e condições de pagamento exclusivos
-        </p>
+      <div className="border-b border-gray-100 pb-4 flex justify-between items-center flex-wrap gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-850">Configurações Gerais</h2>
+          <p className="text-xs text-gray-500 font-sans">
+            Gerencie perfis corporativos e integre com APIs de boleto e mensagens para WhatsApp
+          </p>
+        </div>
       </div>
 
-      {success && (
-        <div className="rounded-lg bg-green-50 p-4 border border-green-200 text-green-800 text-sm font-medium flex items-center gap-2">
-          <Check className="h-5 w-5 animate-bounce" />
-          {success}
-        </div>
-      )}
+      {/* Sub-abas de Navegação */}
+      <div className="flex border-b border-gray-200">
+        <button
+          onClick={() => setActiveSubTab('cadastro')}
+          className={`px-4 py-2.5 font-sans font-medium text-xs transition-all border-b-2 flex items-center gap-2 ${
+            activeSubTab === 'cadastro'
+              ? 'border-indigo-650 text-indigo-650 font-bold border-b-2'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <Building className="h-4 w-4" />
+          Cadastro e Perfis de Empresa
+        </button>
+        <button
+          onClick={() => setActiveSubTab('boleto_api')}
+          className={`px-4 py-2.5 font-sans font-medium text-xs transition-all border-b-2 flex items-center gap-2 ${
+            activeSubTab === 'boleto_api'
+              ? 'border-indigo-650 text-indigo-650 font-bold border-b-2'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          <Key className="h-4 w-4" />
+          Conf. Boleto API
+        </button>
+      </div>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 p-4 border border-red-200 text-red-800 text-sm font-medium">
-          {error}
-        </div>
-      )}
+      {activeSubTab === 'cadastro' ? (
+        <>
+          {success && (
+            <div className="rounded-lg bg-green-50 p-4 border border-green-200 text-green-800 text-sm font-medium flex items-center gap-2">
+              <Check className="h-5 w-5 animate-bounce" />
+              {success}
+            </div>
+          )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {error && (
+            <div className="rounded-lg bg-red-50 p-4 border border-red-200 text-red-800 text-sm font-medium">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Painel Esquerdo: Menu de Empresas */}
         <div className="lg:col-span-4 bg-white rounded-xl border border-gray-150 p-4 shadow-sm space-y-4">
           <div className="flex justify-between items-center pb-2 border-b border-gray-100">
@@ -453,6 +646,336 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           </form>
         </div>
       </div>
+        </>
+      ) : (
+        <div className="space-y-6">
+          {integrationSuccess && (
+            <div className="rounded-lg bg-green-50 p-4 border border-green-200 text-green-800 text-sm font-medium flex items-center gap-2">
+              <Check className="h-5 w-5 animate-bounce" />
+              {integrationSuccess}
+            </div>
+          )}
+
+          {integrationError && (
+            <div className="rounded-lg bg-red-50 p-4 border border-red-200 text-red-800 text-sm font-medium flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-red-600 animate-pulse" />
+              {integrationError}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            {/* Coluna 1: Formulário de Configuração de APIs */}
+            <form onSubmit={saveIntegrationSettings} className="xl:col-span-5 space-y-4 bg-white p-5 rounded-xl border border-gray-150 shadow-sm">
+              <div className="border-b border-gray-100 pb-3 mb-4">
+                <h3 className="text-sm font-bold text-gray-850 flex items-center gap-2">
+                  <Settings2 className="h-4 w-4 text-indigo-600" />
+                  Credenciais de Integração
+                </h3>
+                <p className="text-[11px] text-gray-400">
+                  Configure as chaves e rotas para conectar os sistemas Bom Controle e Whaticket
+                </p>
+              </div>
+
+              {/* Bom Controle API Key */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1">
+                  <Key className="h-3.5 w-3.5 text-orange-500" />
+                  Bom Controle ApiKey
+                </label>
+                <input
+                  type="password"
+                  value={integrationSettings.bom_controle_api_key}
+                  onChange={(e) => setIntegrationSettings({ ...integrationSettings, bom_controle_api_key: e.target.value })}
+                  placeholder="ApiKey Z0EjZPzTOb-NVurl..."
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <span className="block text-[10px] text-gray-400">Insira a chave do Bom Controle para consulta de faturas.</span>
+              </div>
+
+              {/* Whaticket API Token */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1">
+                  <Lock className="h-3.5 w-3.5 text-emerald-500" />
+                  Whaticket API Token
+                </label>
+                <input
+                  type="password"
+                  value={integrationSettings.whaticket_api_token}
+                  onChange={(e) => setIntegrationSettings({ ...integrationSettings, whaticket_api_token: e.target.value })}
+                  placeholder="Seu token de portador (Bearer)"
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <span className="block text-[10px] text-gray-400">Token de acesso Bearer para autenticação no painel Whaticket.</span>
+              </div>
+
+              {/* Whaticket API URL */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1">
+                  <Share2 className="h-3.5 w-3.5 text-indigo-500" />
+                  URL da API Whaticket
+                </label>
+                <input
+                  type="text"
+                  value={integrationSettings.whaticket_api_url}
+                  onChange={(e) => setIntegrationSettings({ ...integrationSettings, whaticket_api_url: e.target.value })}
+                  placeholder="https://apichat.unityautomacoes.com.br"
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <span className="block text-[10px] text-gray-400">Endpoint base do seu Whaticket.</span>
+              </div>
+
+              {/* Template de Mensagem do WhatsApp */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1">
+                  <MessageSquare className="h-3.5 w-3.5 text-indigo-500" />
+                  Modelo de Mensagem de Cobrança
+                </label>
+                <textarea
+                  rows={4}
+                  value={integrationSettings.whaticket_default_message}
+                  onChange={(e) => setIntegrationSettings({ ...integrationSettings, whaticket_default_message: e.target.value })}
+                  placeholder="Escreva a mensagem padrão..."
+                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-150 space-y-1">
+                  <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide">Placeholders Suportados:</span>
+                  <div className="grid grid-cols-3 gap-1.5 text-[9px] font-mono text-indigo-650">
+                    <div>{'{valor}'}</div>
+                    <div>{'{vencimento}'}</div>
+                    <div>{'{link_boleto}'}</div>
+                  </div>
+                  <span className="block text-[9px] text-gray-400 pt-1">Eles serão substituídos automaticamente pelos dados reais da fatura.</span>
+                </div>
+              </div>
+
+              {/* Botão de Gravação de Integrações */}
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={integrationLoading}
+                  className="w-full sm:w-auto px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-colors shadow-sm disabled:bg-indigo-400 flex items-center justify-center gap-1.5"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${integrationLoading ? 'animate-spin' : ''}`} />
+                  {integrationLoading ? 'Salvando...' : 'Salvar Configurações de API'}
+                </button>
+              </div>
+            </form>
+
+            {/* Coluna 2: Sandbox de Consulta e Envio */}
+            <div className="xl:col-span-7 space-y-6">
+              {/* Box 1: Consulta de Fatura do Bom Controle */}
+              <div className="bg-white p-5 rounded-xl border border-gray-150 shadow-sm space-y-4">
+                <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-850 flex items-center gap-2">
+                      <Search className="h-4 w-4 text-orange-500" />
+                      Consulta Integrada Bom Controle
+                    </h3>
+                    <p className="text-[11px] text-gray-400">
+                      Consulte faturas em tempo real e gere disparos para WhatsApp
+                    </p>
+                  </div>
+                  <a 
+                    href="https://documenter.getpostman.com/view/1797561/SWT7BKWo?version=latest#b6655e34-c67b-4408-bcc6-88f9e371236e"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] font-medium text-indigo-600 hover:underline flex items-center gap-1"
+                  >
+                    <BookOpen className="h-3 w-3" />
+                    Doc BomControle
+                  </a>
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      value={testFaturaId}
+                      onChange={(e) => setTestFaturaId(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearchFatura(); }}
+                      placeholder="Ex: 1"
+                      className="block w-full rounded-lg border border-gray-300 pl-3 pr-10 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                    />
+                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400 text-xs">
+                      ID
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSearchFatura}
+                    disabled={faturaLoading}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-colors shadow-sm disabled:bg-orange-350 flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${faturaLoading ? 'animate-spin' : ''}`} />
+                    {faturaLoading ? 'Buscando...' : 'Buscar Fatura'}
+                  </button>
+                </div>
+
+                {faturaError && (
+                  <div className="rounded-lg bg-orange-50 p-3 border border-orange-200 text-orange-800 text-xs flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-orange-600" />
+                    <span>{faturaError}</span>
+                  </div>
+                )}
+
+                {/* Exibição Elegante da Fatura em Formato de Bento/Cartão */}
+                {fetchedFatura && (
+                  <div className="bg-gradient-to-br from-gray-50 to-indigo-50/20 border border-gray-150 rounded-xl p-4 space-y-4 animate-fade-in">
+                    <div className="flex justify-between items-start flex-wrap gap-2 border-b border-gray-200/60 pb-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Cliente / Sacado</span>
+                        <h4 className="text-sm font-bold text-gray-800">{fetchedFatura.Cliente?.Nome || 'Cliente Não Informado'}</h4>
+                        <span className="text-[10px] text-gray-400 font-mono">CNPJ/CPF: {fetchedFatura.Cliente?.CnpjCpf || 'N/A'}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">ID Fatura</span>
+                        <span className="inline-block bg-indigo-100 text-indigo-800 font-mono font-bold text-xs px-2 py-0.5 rounded-full">
+                          #{fetchedFatura.Id}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white p-2.5 rounded-lg border border-gray-100">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase block">Valor Total</span>
+                        <span className="text-sm font-bold text-indigo-650">
+                          {fetchedFatura.Valor !== undefined ? `R$ ${Number(fetchedFatura.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'R$ 0,00'}
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded-lg border border-gray-100">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase block">Vencimento</span>
+                        <span className="text-xs font-bold text-gray-800">
+                          {fetchedFatura.Vencimento ? new Date(fetchedFatura.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded-lg border border-gray-100">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase block">Status</span>
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold mt-1 px-2 py-0.5 rounded-full ${
+                          fetchedFatura.Quitada 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          <CheckCircle className="h-3 w-3 shrink-0" />
+                          {fetchedFatura.Quitada ? 'Quitada' : 'Pendente'}
+                        </span>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded-lg border border-gray-100">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase block">Forma Pagamento</span>
+                        <span className="text-[10px] font-bold text-gray-700">
+                          {fetchedFatura.FormaPagamento || 'Boleto'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {fetchedFatura.LinkBoleto && (
+                      <div className="flex items-center justify-between gap-4 bg-white p-2.5 rounded-lg border border-gray-100">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-5 w-5 text-red-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-bold text-gray-400 uppercase block">PDF do Boleto Bancário</span>
+                            <span className="text-[10px] text-gray-600 truncate block font-mono">{fetchedFatura.LinkBoleto}</span>
+                          </div>
+                        </div>
+                        <a
+                          href={fetchedFatura.LinkBoleto}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 text-[10px] font-bold text-indigo-650 hover:text-white hover:bg-indigo-600 border border-indigo-200 hover:border-indigo-600 rounded-lg flex items-center gap-1 transition-colors shrink-0"
+                        >
+                          Visualizar
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Box 3: Disparo via API Whaticket */}
+              {fetchedFatura && (
+                <div className="bg-white p-5 rounded-xl border border-gray-150 shadow-sm space-y-4 animate-fade-in">
+                  <div className="border-b border-gray-100 pb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-850 flex items-center gap-2">
+                        <Smartphone className="h-4 w-4 text-indigo-600 animate-pulse" />
+                        Disparar Cobrança para WhatsApp
+                      </h3>
+                      <p className="text-[11px] text-gray-400">
+                        Envie os detalhes da fatura e o arquivo PDF do boleto diretamente via Whaticket
+                      </p>
+                    </div>
+                  </div>
+
+                  {sendSuccess && (
+                    <div className="rounded-lg bg-green-50 p-3 border border-green-200 text-green-800 text-xs font-medium flex items-center gap-2">
+                      <Check className="h-4 w-4" />
+                      {sendSuccess}
+                    </div>
+                  )}
+
+                  {sendError && (
+                    <div className="rounded-lg bg-red-50 p-3 border border-red-200 text-red-800 text-xs flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      <span>{sendError}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {/* Número do Celular */}
+                    <div className="space-y-1">
+                      <label className="block text-xs font-bold text-gray-700">Número de WhatsApp (com DDI + DDD)</label>
+                      <input
+                        type="text"
+                        value={whatsAppNumber}
+                        onChange={(e) => setWhatsAppNumber(e.target.value)}
+                        placeholder="Ex: 5585999999999"
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <span className="block text-[10px] text-gray-400">Certifique-se de usar o prefixo do país (55 para Brasil).</span>
+                    </div>
+
+                    {/* Mensagem Modificada */}
+                    <div className="space-y-1">
+                      <label className="block text-xs font-bold text-gray-700">Mensagem Personalizada</label>
+                      <textarea
+                        rows={4}
+                        value={whatsAppMessage}
+                        onChange={(e) => setWhatsAppMessage(e.target.value)}
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Ações de Envio */}
+                    <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                      <button
+                        onClick={() => handleSendWhatsApp(false)}
+                        disabled={sendLoading}
+                        className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-850 border border-gray-200 hover:border-gray-300 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Send className="h-3.5 w-3.5 text-gray-600" />
+                        Enviar Apenas Texto
+                      </button>
+
+                      {fetchedFatura.LinkBoleto && (
+                        <button
+                          onClick={() => handleSendWhatsApp(true)}
+                          disabled={sendLoading}
+                          className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-emerald-100" />
+                          Enviar PDF + Legenda
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
