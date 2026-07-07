@@ -81,6 +81,22 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bomSearchError, setBomSearchError] = useState<string | null>(null);
   const [bomSelectedDetail, setBomSelectedDetail] = useState<any | null>(null);
 
+  // --- ESTADOS E REFS PARA SELEÇÃO E ENVIO EM MASSA ---
+  const [selectedFaturas, setSelectedFaturas] = useState<Record<string, boolean>>({});
+  const [bulkSending, setBulkSending] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(0);
+  const [bulkTotal, setBulkTotal] = useState(0);
+  const [bulkDelay, setBulkDelay] = useState(10);
+  const [bulkLogs, setBulkLogs] = useState<{ id: string; name: string; status: 'pending' | 'loading' | 'sending' | 'success' | 'error'; error?: string }[]>([]);
+  const [bulkSendAsMedia, setBulkSendAsMedia] = useState(true);
+  const bulkCancelledRef = React.useRef(false);
+
+  // Dynamic companies list
+  const [empresasLoaded, setEmpresasLoaded] = useState<{ id: string; nome: string }[]>([
+    { id: '1', nome: 'Grupo de Serviços 1' },
+    { id: '2', nome: 'Grupo de Serviços 2' }
+  ]);
+
   const handleBomSearch = async () => {
     if (!bomSearchQuery) {
       setBomSearchError('Por favor, digite um termo ou ID para pesquisa.');
@@ -177,7 +193,78 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || `Fatura não encontrada ou erro ${res.status}`);
       }
-      const data = await res.json();
+      let data = await res.json();
+      
+      // Normalização robusta de propriedades da Fatura
+      if (!data.Vencimento && data.DataVencimento) {
+        data.Vencimento = data.DataVencimento;
+      }
+      if (!data.Cliente) {
+        data.Cliente = {};
+      }
+      if (!data.Cliente.Nome) {
+        data.Cliente.Nome = data.NomeCliente || data.NomeClienteFornecedor || data.Nome;
+      }
+      if (!data.Cliente.CnpjCpf) {
+        data.Cliente.CnpjCpf = data.DocumentoClienteFornecedor || 'N/A';
+      }
+
+      // Busca item local correspondente na busca por período
+      const localItem = faturasList?.find((item: any) => String(item.Id) === String(id));
+      if (localItem) {
+        if (!data.Cliente.Nome && (localItem.NomeCliente || localItem.Cliente?.Nome)) {
+          data.Cliente.Nome = localItem.NomeCliente || localItem.Cliente?.Nome;
+        }
+        if (!data.Cliente.CnpjCpf && localItem.Cliente?.CnpjCpf) {
+          data.Cliente.CnpjCpf = localItem.Cliente?.CnpjCpf;
+        }
+        if (!data.Vencimento && localItem.Vencimento) {
+          data.Vencimento = localItem.Vencimento;
+        }
+        if (!data.Valor && localItem.Valor) {
+          data.Valor = localItem.Valor;
+        }
+        if (!data.FormaPagamento && localItem.FormaPagamento) {
+          data.FormaPagamento = localItem.FormaPagamento;
+        }
+        if (!data.LinkBoleto && localItem.LinkBoleto) {
+          data.LinkBoleto = localItem.LinkBoleto;
+        }
+      }
+
+      if (!data.Cliente.Nome) {
+        data.Cliente.Nome = 'Cliente Não Informado';
+      }
+
+      // Descobre e busca dados completos do cliente do Bom Controle
+      let clientId = data.Cliente?.Id || data.IdCliente || data.ClienteId || data.IdSacado;
+      if (!clientId && localItem) {
+        clientId = localItem.Cliente?.Id || localItem.IdCliente;
+      }
+
+      if (clientId) {
+        try {
+          const clientRes = await fetch(`/api/integration/bom-controle/cliente/${clientId}`);
+          if (clientRes.ok) {
+            const clientData = await clientRes.json();
+            const clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia;
+            const clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf;
+            const clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+            
+            data.Cliente = {
+              ...data.Cliente,
+              ...clientData,
+              Id: clientId,
+              Nome: clientName || data.Cliente?.Nome || localItem?.Cliente?.Nome || 'Cliente Não Informado',
+              CnpjCpf: clientDoc || data.Cliente?.CnpjCpf || localItem?.Cliente?.CnpjCpf || 'N/A',
+              Celular: clientCel || data.Cliente?.Celular || ''
+            };
+          }
+        } catch (e) {
+          console.error('Erro ao carregar dados detalhados do cliente:', e);
+        }
+      }
+
       setFetchedFatura(data);
 
       const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
@@ -186,9 +273,22 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       let vencimento = 'N/A';
       if (rawVencimento) {
         try {
-          const date = new Date(rawVencimento);
-          vencimento = date.toLocaleDateString('pt-BR');
-        } catch (e) {}
+          let normalized = String(rawVencimento).trim();
+          if (normalized.includes(' ') && !normalized.includes('T')) {
+            normalized = normalized.replace(' ', 'T');
+          }
+          const date = new Date(normalized);
+          if (!isNaN(date.getTime())) {
+            vencimento = date.toLocaleDateString('pt-BR');
+          } else {
+            const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (match) {
+              vencimento = `${match[3]}/${match[2]}/${match[1]}`;
+            }
+          }
+        } catch (e) {
+          console.error('Erro ao formatar vencimento:', e);
+        }
       }
 
       const link = data.LinkBoleto || '';
@@ -200,7 +300,15 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       setWhatsAppMessage(msg);
 
-      const rootPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+      // Preenche o telefone preferencial para envio
+      let rootPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+      if (!rootPhone && Array.isArray(data.Cliente?.Contatos)) {
+        const contact = data.Cliente.Contatos.find((c: any) => c.Telefone || c.Celular);
+        if (contact) {
+          rootPhone = contact.Telefone || contact.Celular;
+        }
+      }
+
       if (rootPhone) {
         let phone = rootPhone;
         phone = phone.replace(/\D/g, '');
@@ -359,6 +467,217 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       fetchIntegrationSettings();
     }
   }, [activeSubTab]);
+
+  useEffect(() => {
+    const loadEmpresas = async () => {
+      try {
+        const res = await fetch('/api/integration/bom-controle/empresas/pesquisar?pesquisa=');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const mapped = data.map((emp: any) => ({
+              id: String(emp.Id || emp.id),
+              nome: emp.Nome || emp.RazaoSocial || emp.NomeFantasia || `Empresa ${emp.Id || emp.id}`
+            }));
+            setEmpresasLoaded(mapped);
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao carregar nomes das empresas:', err);
+      }
+    };
+    loadEmpresas();
+  }, []);
+
+  const handleToggleSelectFatura = (id: string | number) => {
+    setSelectedFaturas(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const handleToggleSelectAllFaturas = () => {
+    if (!faturasList) return;
+    const allSelected = faturasList.every(f => selectedFaturas[f.Id]);
+    const updated: Record<string, boolean> = {};
+    if (!allSelected) {
+      faturasList.forEach(f => {
+        updated[f.Id] = true;
+      });
+    }
+    setSelectedFaturas(updated);
+  };
+
+  const handleStartBulkSend = async (sendAsMedia: boolean) => {
+    if (!faturasList) return;
+    const itemsToSend = faturasList.filter(f => selectedFaturas[f.Id]);
+    if (itemsToSend.length === 0) {
+      alert('Por favor, selecione pelo menos uma fatura para envio em massa.');
+      return;
+    }
+
+    setBulkSending(true);
+    bulkCancelledRef.current = false;
+    setBulkProgress(0);
+    setBulkTotal(itemsToSend.length);
+    setBulkSendAsMedia(sendAsMedia);
+
+    // Inicializa logs de envio
+    const initialLogs = itemsToSend.map(f => ({
+      id: String(f.Id),
+      name: f.Cliente?.Nome || f.NomeCliente || 'Cliente Não Informado',
+      status: 'pending' as const
+    }));
+    setBulkLogs(initialLogs);
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    for (let i = 0; i < itemsToSend.length; i++) {
+      // Verifica cancelamento
+      if (bulkCancelledRef.current) {
+        setBulkLogs(prev => prev.map(log => 
+          log.status === 'pending' || log.status === 'loading' || log.status === 'sending'
+            ? { ...log, status: 'error' as const, error: 'Cancelado pelo usuário.' }
+            : log
+        ));
+        break;
+      }
+
+      const item = itemsToSend[i];
+      const itemId = String(item.Id);
+
+      // Marca como 'loading' no log
+      setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'loading' as const } : log));
+
+      try {
+        // Busca os detalhes da fatura
+        const res = await fetch(`/api/integration/bom-controle/fatura/${item.Id}`);
+        if (!res.ok) {
+          throw new Error(`Erro ao buscar fatura detalhada (${res.status})`);
+        }
+        let data = await res.json();
+
+        // Fallbacks da lista
+        if (!data.Cliente) data.Cliente = {};
+        if (!data.Cliente.Nome) data.Cliente.Nome = item.NomeCliente || item.Cliente?.Nome || 'Cliente Não Informado';
+        if (!data.Cliente.CnpjCpf) data.Cliente.CnpjCpf = item.Cliente?.CnpjCpf || 'N/A';
+        if (!data.Vencimento) data.Vencimento = item.Vencimento;
+        if (!data.Valor) data.Valor = item.Valor;
+        if (!data.FormaPagamento) data.FormaPagamento = item.FormaPagamento;
+        if (!data.LinkBoleto) data.LinkBoleto = item.LinkBoleto;
+
+        let clientId = data.Cliente?.Id || data.IdCliente || data.ClienteId || data.IdSacado;
+        if (!clientId) {
+          clientId = item.Cliente?.Id || item.IdCliente;
+        }
+
+        if (clientId) {
+          try {
+            const clientRes = await fetch(`/api/integration/bom-controle/cliente/${clientId}`);
+            if (clientRes.ok) {
+              const clientData = await clientRes.json();
+              data.Cliente = {
+                ...data.Cliente,
+                ...clientData,
+                Id: clientId,
+                Nome: clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || data.Cliente?.Nome || 'Cliente Não Informado',
+                CnpjCpf: clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || data.Cliente?.CnpjCpf || 'N/A',
+                Celular: clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || data.Cliente?.Celular || ''
+              };
+            }
+          } catch (e) {
+            console.error('Erro bulk client fetch:', e);
+          }
+        }
+
+        // Descobre o telefone para envio
+        let targetPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+        
+        // Se não tiver telefone direto, varre contatos adicionais
+        if (!targetPhone && Array.isArray(data.Cliente?.Contatos)) {
+          const mainContact = data.Cliente.Contatos.find((c: any) => c.Padrao || c.Cobranca) || data.Cliente.Contatos[0];
+          if (mainContact) {
+            targetPhone = mainContact.Telefone || mainContact.Celular;
+          }
+        }
+
+        if (!targetPhone) {
+          throw new Error('Telefone de contato não cadastrado.');
+        }
+
+        let cleanPhone = targetPhone.replace(/\D/g, '');
+        if (cleanPhone.length > 0 && !cleanPhone.startsWith('55')) {
+          cleanPhone = '55' + cleanPhone;
+        }
+
+        // Prepara mensagem substituindo placeholders
+        const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+        const rawVencimento = data.Vencimento || data.DataVencimento;
+        let vencimento = 'N/A';
+        if (rawVencimento) {
+          try {
+            const date = new Date(rawVencimento);
+            vencimento = date.toLocaleDateString('pt-BR');
+          } catch (e) {}
+        }
+        const link = data.LinkBoleto || '';
+
+        let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+        msg = msg.replace('{valor}', valor)
+                 .replace('{vencimento}', vencimento)
+                 .replace('{link_boleto}', link);
+
+        // Atualiza para 'sending'
+        setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+        // Envia via API do Whaticket
+        const payload = {
+          number: cleanPhone,
+          body: msg,
+          pdfUrl: sendAsMedia ? link : undefined
+        };
+
+        const sendRes = await fetch('/api/integration/whaticket/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!sendRes.ok) {
+          const errData = await sendRes.json().catch(() => ({}));
+          throw new Error(errData.error || `Erro HTTP ${sendRes.status} no Whaticket`);
+        }
+
+        // Sucesso
+        setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'success' as const } : log));
+      } catch (err: any) {
+        setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'error' as const, error: err.message || 'Falha desconhecida' } : log));
+      }
+
+      // Atualiza progresso
+      setBulkProgress(i + 1);
+
+      // Espera o delay/intervalo antes da próxima mensagem se não for o último
+      if (i < itemsToSend.length - 1) {
+        const totalDelayMs = bulkDelay * 1000;
+        const checkIntervalMs = 250;
+        let elapsed = 0;
+        while (elapsed < totalDelayMs) {
+          if (bulkCancelledRef.current) {
+            break;
+          }
+          await sleep(checkIntervalMs);
+          elapsed += checkIntervalMs;
+        }
+      }
+    }
+
+    setBulkSending(false);
+  };
+
+  const handleCancelBulkSend = () => {
+    bulkCancelledRef.current = true;
+  };
 
   // Carrega lista de empresas do servidor
   const fetchCompanies = async (selectId?: number) => {
@@ -1049,8 +1368,11 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                           className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none font-bold"
                         >
                           <option value="">Todas as Empresas</option>
-                          <option value="1">Empresa 1 (ID 1)</option>
-                          <option value="2">Empresa 2 (ID 2)</option>
+                          {empresasLoaded.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.nome}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -1094,12 +1416,23 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                 {faturaSearchMode === 'periodo' && faturasList && (
                   <div className="border border-gray-150 rounded-lg overflow-hidden bg-white shadow-xs">
-                    <div className="bg-gray-50 px-3 py-2 border-b border-gray-150 flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                        Faturas Encontradas ({faturasList.length})
-                      </span>
+                    <div className="bg-gray-50 px-3 py-2 border-b border-gray-150 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {faturasList.length > 0 && (
+                          <input
+                            type="checkbox"
+                            checked={faturasList.length > 0 && faturasList.every(f => selectedFaturas[f.Id])}
+                            onChange={handleToggleSelectAllFaturas}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                            title="Selecionar todas para Envio em Massa"
+                          />
+                        )}
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                          Faturas Encontradas ({faturasList.length})
+                        </span>
+                      </div>
                       {faturasList.length > 0 && (
-                        <span className="text-[9px] text-gray-400">Clique em "Selecionar" para carregar</span>
+                        <span className="text-[9px] text-gray-400">Marque para Envio em Massa ou clique em "Selecionar"</span>
                       )}
                     </div>
                     
@@ -1108,9 +1441,10 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         Nenhuma fatura encontrada para o período selecionado.
                       </div>
                     ) : (
-                      <div className="max-h-[220px] overflow-y-auto divide-y divide-gray-100">
+                      <div className="max-h-[250px] overflow-y-auto divide-y divide-gray-100">
                         {faturasList.map((f: any) => {
                           const isSelected = fetchedFatura && fetchedFatura.Id === f.Id;
+                          const isChecked = !!selectedFaturas[f.Id];
                           return (
                             <div 
                               key={f.Id} 
@@ -1118,43 +1452,51 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                 isSelected ? 'bg-indigo-50/50' : 'hover:bg-gray-50'
                               }`}
                             >
-                              <div className="min-w-0 flex-1 space-y-0.5">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-mono font-bold text-indigo-850">#{f.Id}</span>
-                                  <span className="font-bold text-gray-800 truncate max-w-[150px] md:max-w-[200px]">
-                                    {f.Cliente?.Nome || f.NomeCliente || 'Cliente Não Informado'}
-                                  </span>
-                                  <span className={`inline-block text-[8px] font-bold px-1.5 py-0.2 rounded-full ${
-                                    f.Quitada 
-                                      ? 'bg-green-100 text-green-800' 
-                                      : 'bg-amber-100 text-amber-800'
-                                  }`}>
-                                    {f.Quitada ? 'Quitada' : 'Pendente'}
-                                  </span>
-                                </div>
-                                <div className="flex gap-4 items-center text-[10px] text-gray-400 font-mono">
-                                  <span>Venc: {f.Vencimento ? new Date(f.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}</span>
-                                  <span className="font-bold text-indigo-600">
-                                    {f.Valor !== undefined ? `R$ ${Number(f.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'R$ 0,00'}
-                                  </span>
-                                  {f.LinkBoleto && (
-                                    <a
-                                      href={f.LinkBoleto}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-red-500 hover:text-red-700 font-bold flex items-center gap-0.5 hover:underline"
-                                      title="Visualizar Boleto"
-                                    >
-                                      <FileText className="h-3.5 w-3.5" />
-                                      PDF do Boleto
-                                    </a>
-                                  )}
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleSelectFatura(f.Id)}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer shrink-0"
+                                />
+                                <div className="min-w-0 flex-1 space-y-0.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-mono font-bold text-indigo-850">#{f.Id}</span>
+                                    <span className="font-bold text-gray-800 truncate max-w-[150px] md:max-w-[200px]">
+                                      {f.Cliente?.Nome || f.NomeCliente || 'Cliente Não Informado'}
+                                    </span>
+                                    <span className={`inline-block text-[8px] font-bold px-1.5 py-0.2 rounded-full ${
+                                      f.Quitada 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : 'bg-amber-100 text-amber-800'
+                                    }`}>
+                                      {f.Quitada ? 'Quitada' : 'Pendente'}
+                                    </span>
+                                  </div>
+                                  <div className="flex gap-4 items-center text-[10px] text-gray-400 font-mono">
+                                    <span>Venc: {f.Vencimento ? new Date(f.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}</span>
+                                    <span className="font-bold text-indigo-600">
+                                      {f.Valor !== undefined ? `R$ ${Number(f.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'R$ 0,00'}
+                                    </span>
+                                    {f.LinkBoleto && (
+                                      <a
+                                        href={f.LinkBoleto}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-red-500 hover:text-red-700 font-bold flex items-center gap-0.5 hover:underline"
+                                        title="Visualizar Boleto"
+                                      >
+                                        <FileText className="h-3.5 w-3.5" />
+                                        PDF
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <button
                                 onClick={() => handleSelectFaturaById(f.Id)}
                                 disabled={faturaLoading}
-                                className={`px-2.5 py-1 text-[10px] font-bold rounded-md border transition-colors ${
+                                className={`px-2.5 py-1 text-[10px] font-bold rounded-md border transition-colors shrink-0 ${
                                   isSelected
                                     ? 'bg-indigo-650 text-white border-indigo-650'
                                     : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -1170,14 +1512,146 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   </div>
                 )}
 
+                {/* Painel de Envio em Massa (Bulk Actions) */}
+                {(() => {
+                  const numSelected = Object.values(selectedFaturas).filter(Boolean).length;
+                  if (numSelected === 0) return null;
+
+                  return (
+                    <div className="bg-indigo-50/30 border border-indigo-200 rounded-xl p-4 space-y-4 animate-fade-in">
+                      <div className="flex justify-between items-center border-b border-indigo-150 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <Send className="h-4 w-4 text-indigo-600" />
+                          <h4 className="text-xs font-extrabold text-indigo-900 uppercase tracking-wider">
+                            Painel de Disparo em Massa
+                          </h4>
+                        </div>
+                        <span className="px-2 py-0.5 bg-indigo-200 text-indigo-800 text-[10px] font-extrabold rounded-full">
+                          {numSelected} faturas selecionadas
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase">
+                            Intervalo entre disparos (segundos)
+                          </label>
+                          <input
+                            type="number"
+                            min={2}
+                            disabled={bulkSending}
+                            value={bulkDelay}
+                            onChange={(e) => setBulkDelay(Math.max(2, Number(e.target.value) || 2))}
+                            className="block w-full rounded-lg border border-gray-350 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none bg-white font-bold"
+                          />
+                          <p className="text-[9px] text-gray-400">
+                            Recomendado: 10-15s para respeitar as políticas de antispam do WhatsApp.
+                          </p>
+                        </div>
+
+                        <div className="bg-white/80 p-2.5 rounded-lg border border-indigo-100 text-[10px] text-gray-500 space-y-1">
+                          <span className="font-bold text-indigo-850 uppercase block text-[8px] tracking-wide">
+                            Mensagem que será enviada (Template):
+                          </span>
+                          <p className="font-sans line-clamp-3 italic text-gray-650 bg-gray-50 p-1.5 rounded border border-gray-100 font-mono">
+                            {integrationSettings.whaticket_default_message || 'Nenhum template salvo.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Progresso e Controles durante Envio */}
+                      {bulkSending && (
+                        <div className="space-y-3.5 bg-white p-3 rounded-xl border border-indigo-150 shadow-xs">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-indigo-900">
+                              Enviando: {bulkProgress} de {bulkTotal} faturas ({Math.round((bulkProgress / bulkTotal) * 100)}%)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleCancelBulkSend}
+                              className="px-2.5 py-1 text-[10px] font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-650 hover:text-white rounded-md transition-colors"
+                            >
+                              Interromper Envio
+                            </button>
+                          </div>
+
+                          <div className="w-full bg-gray-100 rounded-full h-2">
+                            <div 
+                              className="bg-indigo-600 h-2 rounded-full transition-all duration-300" 
+                              style={{ width: `${(bulkProgress / bulkTotal) * 100}%` }}
+                            />
+                          </div>
+
+                          {/* Console de logs / Termômetro de disparos */}
+                          <div className="space-y-1">
+                            <span className="block text-[9px] font-bold uppercase text-gray-400">Status dos Disparos em Tempo Real:</span>
+                            <div className="bg-gray-900 text-gray-200 font-mono text-[9px] p-2.5 rounded-lg max-h-[140px] overflow-y-auto space-y-1.5 border border-gray-955">
+                              {bulkLogs.map((log) => {
+                                const statusColors = {
+                                  pending: 'text-gray-400',
+                                  loading: 'text-yellow-400 animate-pulse',
+                                  sending: 'text-orange-400 animate-pulse',
+                                  success: 'text-green-400 font-bold',
+                                  error: 'text-red-400 font-bold'
+                                };
+                                return (
+                                  <div key={log.id} className="flex justify-between gap-4 items-start border-b border-gray-800 pb-1 last:border-0 last:pb-0">
+                                    <span className="truncate">
+                                      #{log.id} - {log.name}
+                                    </span>
+                                    <span className={`shrink-0 uppercase ${statusColors[log.status]}`}>
+                                      {log.status === 'pending' && 'Aguardando'}
+                                      {log.status === 'loading' && 'Carregando Cliente'}
+                                      {log.status === 'sending' && 'Enviando...'}
+                                      {log.status === 'success' && '✓ Enviado'}
+                                      {log.status === 'error' && `✗ Erro: ${log.error || 'Falha'}`}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Botões de Ação para Envio */}
+                      {!bulkSending && (
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleStartBulkSend(false)}
+                            className="flex-1 px-4 py-2.5 bg-gray-150 hover:bg-gray-200 text-gray-850 border border-gray-200 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <Send className="h-3.5 w-3.5 text-indigo-600" />
+                            Disparar Apenas Texto em Massa
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleStartBulkSend(true)}
+                            className="flex-1 px-4 py-2.5 bg-indigo-650 hover:bg-indigo-750 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                          >
+                            <FileText className="h-3.5 w-3.5 text-indigo-100" />
+                            Disparar PDF + Legenda em Massa
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Exibição Elegante da Fatura em Formato de Bento/Cartão */}
                 {fetchedFatura && (
                   <div className="bg-gradient-to-br from-gray-50 to-indigo-50/20 border border-gray-150 rounded-xl p-4 space-y-4 animate-fade-in">
                     <div className="flex justify-between items-start flex-wrap gap-2 border-b border-gray-200/60 pb-3">
                       <div>
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Cliente / Sacado</span>
-                        <h4 className="text-sm font-bold text-gray-800">{fetchedFatura.Cliente?.Nome || 'Cliente Não Informado'}</h4>
-                        <span className="text-[10px] text-gray-400 font-mono">CNPJ/CPF: {fetchedFatura.Cliente?.CnpjCpf || 'N/A'}</span>
+                        <h4 className="text-sm font-bold text-gray-800">
+                          {fetchedFatura.Cliente?.Nome || fetchedFatura.NomeCliente || fetchedFatura.NomeClienteFornecedor || 'Cliente Não Informado'}
+                        </h4>
+                        <span className="text-[10px] text-gray-400 font-mono">
+                          CNPJ/CPF: {fetchedFatura.Cliente?.CnpjCpf || fetchedFatura.DocumentoClienteFornecedor || 'N/A'}
+                        </span>
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">ID Fatura</span>
@@ -1198,7 +1672,21 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       <div className="bg-white p-2.5 rounded-lg border border-gray-100">
                         <span className="text-[9px] font-bold text-gray-400 uppercase block">Vencimento</span>
                         <span className="text-xs font-bold text-gray-800">
-                          {fetchedFatura.Vencimento ? new Date(fetchedFatura.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}
+                          {(() => {
+                            const raw = fetchedFatura.Vencimento || fetchedFatura.DataVencimento;
+                            if (!raw) return 'N/A';
+                            try {
+                              let normalized = String(raw).trim();
+                              if (normalized.includes(' ') && !normalized.includes('T')) {
+                                normalized = normalized.replace(' ', 'T');
+                              }
+                              const d = new Date(normalized);
+                              if (!isNaN(d.getTime())) return d.toLocaleDateString('pt-BR');
+                              const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                              if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+                            } catch (e) {}
+                            return String(raw);
+                          })()}
                         </span>
                       </div>
 
@@ -1450,39 +1938,79 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       {/* Seleção rápida de contatos cadastrados no Bom Controle */}
                       {(() => {
                         const phones: { label: string; number: string; type: string }[] = [];
-                        const rootPhone = fetchedFatura.Cliente?.Celular || fetchedFatura.Cliente?.Telefone || fetchedFatura.Cliente?.CelularWhatsApp;
+                        const c = fetchedFatura.Cliente || {};
+                        const clientName = c.Nome || fetchedFatura.NomeCliente || fetchedFatura.NomeClienteFornecedor || 'Cadastro Principal';
                         
-                        if (rootPhone) {
-                          phones.push({
-                            label: fetchedFatura.Cliente?.Nome || 'Cadastro Principal',
-                            number: rootPhone,
-                            type: 'Principal'
-                          });
-                        }
+                        const candidates = [
+                          { num: c.Celular, label: 'Celular', type: 'Principal' },
+                          { num: c.Telefone, label: 'Telefone', type: 'Principal' },
+                          { num: c.CelularWhatsApp, label: 'WhatsApp', type: 'WhatsApp' },
+                          { num: c.TelefoneComercial, label: 'Comercial', type: 'Comercial' },
+                          { num: c.TelefoneResidencial, label: 'Residencial', type: 'Residencial' },
+                          { num: c.Fone, label: 'Fone', type: 'Principal' },
+                          { num: c.whatsapp, label: 'WhatsApp', type: 'WhatsApp' },
+                          { num: c.phone, label: 'Phone', type: 'Principal' },
+                          { num: c.mobile, label: 'Mobile', type: 'Mobile' },
+                          { num: fetchedFatura.Telefone, label: 'Telefone Fatura', type: 'Fatura' },
+                          { num: fetchedFatura.Celular, label: 'Celular Fatura', type: 'Fatura' },
+                          { num: fetchedFatura.CelularWhatsApp, label: 'WhatsApp Fatura', type: 'Fatura' },
+                        ];
 
-                        if (Array.isArray(fetchedFatura.Cliente?.Contatos)) {
-                          fetchedFatura.Cliente.Contatos.forEach((contato: any) => {
-                            const cPhone = contato.Telefone || contato.Celular;
-                            if (cPhone) {
-                              const rawPhone = cPhone.replace(/\D/g, '');
-                              const isDup = phones.some(p => p.number.replace(/\D/g, '') === rawPhone);
+                        candidates.forEach(cand => {
+                          if (cand.num) {
+                            const clean = String(cand.num).replace(/\D/g, '');
+                            if (clean.length >= 8) {
+                              const isDup = phones.some(p => p.number.replace(/\D/g, '') === clean);
                               if (!isDup) {
-                                let typeLabel = 'Contato';
-                                if (contato.Padrao && contato.Cobranca) typeLabel = 'Padrão e Cobrança';
-                                else if (contato.Padrao) typeLabel = 'Padrão';
-                                else if (contato.Cobranca) typeLabel = 'Cobrança';
-                                
                                 phones.push({
-                                  label: contato.Nome || 'Sem Nome',
-                                  number: cPhone,
-                                  type: typeLabel
+                                  label: clientName,
+                                  number: String(cand.num),
+                                  type: cand.type
                                 });
+                              }
+                            }
+                          }
+                        });
+
+                        // Check Contatos
+                        const rawContatos = c.Contatos || c.contatos || c.ContatosAdicionais;
+                        if (Array.isArray(rawContatos)) {
+                          rawContatos.forEach((contato: any) => {
+                            const cPhone = contato.Telefone || contato.Celular || contato.CelularWhatsApp || contato.Fone || contato.phone;
+                            if (cPhone) {
+                              const clean = String(cPhone).replace(/\D/g, '');
+                              if (clean.length >= 8) {
+                                const isDup = phones.some(p => p.number.replace(/\D/g, '') === clean);
+                                if (!isDup) {
+                                  let typeLabel = 'Contato';
+                                  if (contato.Padrao && contato.Cobranca) typeLabel = 'Padrão e Cobrança';
+                                  else if (contato.Padrao) typeLabel = 'Padrão';
+                                  else if (contato.Cobranca) typeLabel = 'Cobrança';
+                                  
+                                  phones.push({
+                                    label: contato.Nome || 'Sem Nome',
+                                    number: String(cPhone),
+                                    type: typeLabel
+                                  });
+                                }
                               }
                             }
                           });
                         }
 
-                        if (phones.length === 0) return null;
+                        if (phones.length === 0) {
+                          return (
+                            <div className="bg-orange-50/50 p-2.5 rounded-lg border border-orange-200 text-orange-800 text-xs mt-2">
+                              <p className="font-bold flex items-center gap-1">
+                                <AlertCircle className="h-3.5 w-3.5 text-orange-650 shrink-0" />
+                                Nenhum telefone cadastrado no Bom Controle para este cliente.
+                              </p>
+                              <p className="text-[10px] mt-0.5 text-gray-500">
+                                Digite o número desejado no campo acima para realizar o disparo.
+                              </p>
+                            </div>
+                          );
+                        }
 
                         return (
                           <div className="bg-indigo-50/20 p-2 rounded-lg border border-indigo-100 space-y-1.5 mt-2">
