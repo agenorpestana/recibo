@@ -592,11 +592,8 @@ async function startServer() {
       if (!apiKey) {
         return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
       }
-      const { pesquisa } = req.query;
-      if (!pesquisa) {
-        return res.status(400).json({ error: 'O parâmetro pesquisa é obrigatório.' });
-      }
-      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Empresa/Pesquisar?pesquisa=${encodeURIComponent(pesquisa as string)}`, {
+      const pesquisa = req.query.pesquisa !== undefined ? String(req.query.pesquisa) : '';
+      const response = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Empresa/Pesquisar?pesquisa=${encodeURIComponent(pesquisa)}`, {
         headers: {
           'Authorization': `ApiKey ${apiKey}`
         }
@@ -921,6 +918,268 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Unity Automações] Servidor Express rodando na porta de entrada unificada ${PORT}.`);
   });
+
+  // Agenda verificação de disparo automático a cada 1 hora
+  setInterval(() => {
+    runAutomaticInvoiceDispatch(db).catch(err => {
+      console.error('[Auto Send Job] Erro na execução periódica:', err);
+    });
+  }, 60 * 60 * 1000);
+
+  // Executa uma vez 10 segundos após a inicialização para verificar se já deve disparar hoje
+  setTimeout(() => {
+    console.log('[Auto Send Job] Executando verificação inicial após boot...');
+    runAutomaticInvoiceDispatch(db).catch(err => {
+      console.error('[Auto Send Job] Erro na verificação inicial:', err);
+    });
+  }, 10000);
+}
+
+let lastAutoSendDate = ''; // Evita rodar múltiplas vezes no mesmo dia
+
+async function runAutomaticInvoiceDispatch(db: any) {
+  try {
+    const today = new Date();
+    const currentDay = today.getDate();
+    // Formato YYYY-MM-DD
+    const todayFormatted = today.toISOString().split('T')[0];
+
+    // Carrega configurações
+    const settings = await db.getIntegrationSettings();
+    if (!settings || !settings.auto_send_enabled) {
+      return;
+    }
+
+    const scheduledDay = settings.auto_send_day || 10;
+    if (currentDay !== scheduledDay) {
+      return;
+    }
+
+    // Se já rodou hoje, pula
+    if (lastAutoSendDate === todayFormatted) {
+      return;
+    }
+
+    console.log(`[Auto Send] Iniciando disparo automático de boletos para o dia ${scheduledDay}.`);
+
+    const apiKey = settings.bom_controle_api_key;
+    const token = settings.whaticket_api_token;
+    if (!apiKey || !token) {
+      console.log('[Auto Send] Chave do Bom Controle ou token do Whaticket não configurados.');
+      return;
+    }
+
+    // Calcula período: do início do mês atual ao fim do mês atual
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    
+    // Primeiro dia do mês
+    const dataInicio = `${year}-${month}-01`;
+    // Último dia do mês
+    const lastDayOfMonth = new Date(year, today.getMonth() + 1, 0).getDate();
+    const dataFim = `${year}-${month}-${String(lastDayOfMonth).padStart(2, '0')}`;
+
+    console.log(`[Auto Send] Buscando faturas de ${dataInicio} até ${dataFim}`);
+
+    // Prepara os parâmetros
+    const startFormatted = `${dataInicio} 00:00:00`;
+    const endFormatted = `${dataFim} 23:59:59`;
+    const tipoDataValue = 'DataPadrao';
+
+    const params = new URLSearchParams();
+    params.append('dataInicio', startFormatted);
+    params.append('dataTermino', endFormatted);
+    params.append('tipoData', tipoDataValue);
+    params.append('paginacao.itensPorPagina', '100');
+    params.append('paginacao.numeroDaPagina', '1');
+
+    // Se tiver empresa configurada e não for "all" ou vazia
+    const selectedCompany = settings.auto_send_company_id;
+    if (selectedCompany && selectedCompany !== 'all' && selectedCompany !== '') {
+      params.append('idsEmpresa', selectedCompany);
+    }
+
+    const url = `https://apinewintegracao.bomcontrole.com.br/integracao/Financeiro/Pesquisar?${params.toString()}`;
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': `ApiKey ${apiKey}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erro na busca financeira Bom Controle: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const itemsList = data.Itens || [];
+
+    console.log(`[Auto Send] Encontradas ${itemsList.length} parcelas para processamento.`);
+
+    let sentCount = 0;
+    let skippedCount = 0;
+
+    for (const item of itemsList) {
+      try {
+        // Se já quitada, pula
+        if (item.DataQuitacao) {
+          skippedCount++;
+          continue;
+        }
+
+        // Se não tiver boleto, pula
+        const boletoLink = item.LinkBoletoBancario;
+        if (!boletoLink) {
+          skippedCount++;
+          continue;
+        }
+
+        // Busca o ID da Fatura e ID do Cliente
+        const idFatura = item.IdFatura;
+        const idCliente = item.IdCliente;
+
+        if (!idCliente) {
+          skippedCount++;
+          continue;
+        }
+
+        // Busca detalhes do cliente para pegar o telefone
+        const clientResponse = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Cliente/Obter/${idCliente}`, {
+          headers: {
+            'Authorization': `ApiKey ${apiKey}`
+          }
+        });
+
+        if (!clientResponse.ok) {
+          console.log(`[Auto Send] Erro ao buscar cliente #${idCliente}. Pando...`);
+          skippedCount++;
+          continue;
+        }
+
+        const clientData = await clientResponse.json();
+
+        // Extrai telefone principal
+        let targetPhone = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+        
+        // Se não tiver telefone direto, varre contatos adicionais
+        if (!targetPhone && Array.isArray(clientData.Contatos)) {
+          const mainContact = clientData.Contatos.find((c: any) => c.Padrao || c.Cobranca) || clientData.Contatos[0];
+          if (mainContact) {
+            targetPhone = mainContact.Telefone || mainContact.Celular || '';
+          }
+        }
+
+        if (!targetPhone) {
+          console.log(`[Auto Send] Cliente #${idCliente} (${clientData.Nome || 'Sem Nome'}) não possui telefone. Pando...`);
+          skippedCount++;
+          continue;
+        }
+
+        // Normaliza número
+        let cleanPhone = targetPhone.replace(/\D/g, '');
+        if (cleanPhone.length < 8) {
+          skippedCount++;
+          continue;
+        }
+        if (!cleanPhone.startsWith('55')) {
+          cleanPhone = '55' + cleanPhone;
+        }
+
+        // Prepara mensagem substituindo placeholders
+        const valor = item.Valor !== undefined ? `R$ ${Number(item.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+        const rawVencimento = item.DataVencimento;
+        let vencimento = 'N/A';
+        if (rawVencimento) {
+          try {
+            const date = new Date(rawVencimento);
+            vencimento = date.toLocaleDateString('pt-BR');
+          } catch (e) {}
+        }
+
+        let msg = settings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+        msg = msg.replace('{valor}', valor)
+                 .replace('{vencimento}', vencimento)
+                 .replace('{link_boleto}', boletoLink);
+
+        // Envia via Whaticket
+        const payload = {
+          number: cleanPhone,
+          body: msg,
+          pdfUrl: boletoLink
+        };
+
+        const baseUrl = settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br';
+        const sendUrl = `${baseUrl.replace(/\/$/, '')}/api/messages/send`;
+
+        let sentOk = false;
+        try {
+          // Busca o PDF em buffer
+          const pdfRes = await fetch(boletoLink);
+          if (pdfRes.ok) {
+            const arrayBuffer = await pdfRes.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+
+            if ((globalThis as any).FormData && (globalThis as any).Blob) {
+              const form = new (globalThis as any).FormData();
+              form.append('number', cleanPhone);
+              form.append('body', msg);
+
+              const blob = new (globalThis as any).Blob([buffer], { type: 'application/pdf' });
+              form.append('medias', blob, `boleto_${Date.now()}.pdf`);
+              form.append('sendSignature', 'false');
+              form.append('closeTicket', 'false');
+
+              const responseWhaticket = await fetch(sendUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                },
+                body: form as any
+              });
+              sentOk = responseWhaticket.ok;
+            }
+          }
+        } catch (mediaErr) {
+          console.error('[Auto Send] Erro ao enviar mídia, tentando envio simples de texto:', mediaErr);
+        }
+
+        // Se falhou o envio com mídia, tenta envio de texto
+        if (!sentOk) {
+          const textUrl = `${baseUrl.replace(/\/$/, '')}/api/messages/send`;
+          const textForm = new URLSearchParams();
+          textForm.append('number', cleanPhone);
+          textForm.append('body', msg);
+
+          const responseText = await fetch(textUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: textForm.toString()
+          });
+          sentOk = responseText.ok;
+        }
+
+        if (sentOk) {
+          sentCount++;
+          console.log(`[Auto Send] Boleto #${idFatura} enviado com sucesso para o telefone ${cleanPhone}.`);
+        } else {
+          skippedCount++;
+          console.log(`[Auto Send] Erro ao enviar boleto #${idFatura} via Whaticket.`);
+        }
+      } catch (errItem) {
+        console.error(`[Auto Send] Erro ao processar fatura:`, errItem);
+        skippedCount++;
+      }
+    }
+
+    console.log(`[Auto Send] Processo concluído: ${sentCount} enviados, ${skippedCount} pulados.`);
+    lastAutoSendDate = todayFormatted;
+
+  } catch (e: any) {
+    console.error('[Auto Send] Erro fatal no disparo automático de boletos:', e);
+  }
 }
 
 startServer().catch((error) => {

@@ -104,6 +104,9 @@ export interface IntegrationSettings {
   whaticket_api_token: string;
   whaticket_api_url: string;
   whaticket_default_message: string;
+  auto_send_enabled?: boolean;
+  auto_send_day?: number;
+  auto_send_company_id?: string;
 }
 
 

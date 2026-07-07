@@ -42,7 +42,10 @@ const defaultIntegrationSettings: IntegrationSettings = {
   bom_controle_api_key: '',
   whaticket_api_token: '',
   whaticket_api_url: 'https://apichat.unityautomacoes.com.br',
-  whaticket_default_message: 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}'
+  whaticket_default_message: 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}',
+  auto_send_enabled: false,
+  auto_send_day: 10,
+  auto_send_company_id: ''
 };
 
 const defaultUsers: User[] = [
@@ -198,6 +201,22 @@ class Database {
           ]);
           console.log('[Database Migration] Registro padrão inserido em "integration_settings".');
         }
+
+        // Alterações/migrações incrementais de colunas para Envio Automático
+        try {
+          await pool.query('ALTER TABLE integration_settings ADD COLUMN auto_send_enabled INT NOT NULL DEFAULT 0');
+          console.log('[Database Migration] Coluna "auto_send_enabled" adicionada/validada em "integration_settings".');
+        } catch (err) {}
+
+        try {
+          await pool.query('ALTER TABLE integration_settings ADD COLUMN auto_send_day INT NOT NULL DEFAULT 10');
+          console.log('[Database Migration] Coluna "auto_send_day" adicionada/validada em "integration_settings".');
+        } catch (err) {}
+
+        try {
+          await pool.query('ALTER TABLE integration_settings ADD COLUMN auto_send_company_id VARCHAR(50) DEFAULT NULL');
+          console.log('[Database Migration] Coluna "auto_send_company_id" adicionada/validada em "integration_settings".');
+        } catch (err) {}
       } catch (err) {
         console.error('[Database Migration] Erro ao criar ou inicializar "integration_settings":', err);
       }
@@ -346,12 +365,15 @@ class Database {
       const [rows]: any = await pool.query('SELECT * FROM integration_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message) VALUES (?, ?, ?, ?)',
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             defaultIntegrationSettings.bom_controle_api_key,
             defaultIntegrationSettings.whaticket_api_token,
             defaultIntegrationSettings.whaticket_api_url,
-            defaultIntegrationSettings.whaticket_default_message
+            defaultIntegrationSettings.whaticket_default_message,
+            defaultIntegrationSettings.auto_send_enabled ? 1 : 0,
+            defaultIntegrationSettings.auto_send_day || 10,
+            defaultIntegrationSettings.auto_send_company_id || ''
           ]
         );
         return { ...defaultIntegrationSettings };
@@ -360,7 +382,10 @@ class Database {
         bom_controle_api_key: rows[0].bom_controle_api_key || '',
         whaticket_api_token: rows[0].whaticket_api_token || '',
         whaticket_api_url: rows[0].whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
-        whaticket_default_message: rows[0].whaticket_default_message || ''
+        whaticket_default_message: rows[0].whaticket_default_message || '',
+        auto_send_enabled: rows[0].auto_send_enabled === 1 || !!rows[0].auto_send_enabled,
+        auto_send_day: rows[0].auto_send_day !== null && rows[0].auto_send_day !== undefined ? Number(rows[0].auto_send_day) : 10,
+        auto_send_company_id: rows[0].auto_send_company_id || ''
       };
     } catch (error) {
       console.error('Erro ao obter integration_settings no MySQL:', error);
@@ -378,22 +403,28 @@ class Database {
       const [rows]: any = await pool.query('SELECT id FROM integration_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message) VALUES (?, ?, ?, ?)',
-          [
-            settings.bom_controle_api_key || '',
-            settings.whaticket_api_token || '',
-            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
-            settings.whaticket_default_message || ''
-          ]
-        );
-      } else {
-        await pool.query(
-          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=? WHERE id=?',
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
           [
             settings.bom_controle_api_key || '',
             settings.whaticket_api_token || '',
             settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
             settings.whaticket_default_message || '',
+            settings.auto_send_enabled ? 1 : 0,
+            settings.auto_send_day || 10,
+            settings.auto_send_company_id || ''
+          ]
+        );
+      } else {
+        await pool.query(
+          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=? WHERE id=?',
+          [
+            settings.bom_controle_api_key || '',
+            settings.whaticket_api_token || '',
+            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+            settings.whaticket_default_message || '',
+            settings.auto_send_enabled ? 1 : 0,
+            settings.auto_send_day || 10,
+            settings.auto_send_company_id || '',
             rows[0].id
           ]
         );

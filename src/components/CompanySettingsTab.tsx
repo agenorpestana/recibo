@@ -332,6 +332,24 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [sendSuccess, setSendSuccess] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
+  const loadEmpresas = async () => {
+    try {
+      const res = await fetch('/api/integration/bom-controle/empresas/pesquisar?pesquisa=');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map((emp: any) => ({
+            id: String(emp.Id || emp.id),
+            nome: emp.Nome || emp.RazaoSocial || emp.NomeFantasia || `Empresa ${emp.Id || emp.id}`
+          }));
+          setEmpresasLoaded(mapped);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao carregar nomes das empresas:', err);
+    }
+  };
+
   const fetchIntegrationSettings = async () => {
     try {
       setIntegrationLoading(true);
@@ -363,6 +381,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setIntegrationSettings(data);
       setIntegrationSuccess('Configurações salvas com sucesso!');
       setTimeout(() => setIntegrationSuccess(null), 3000);
+      loadEmpresas();
     } catch (err: any) {
       setIntegrationError(err.message || 'Erro ao salvar configurações.');
     } finally {
@@ -465,29 +484,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   useEffect(() => {
     if (activeSubTab === 'boleto_api') {
       fetchIntegrationSettings();
+      loadEmpresas();
     }
   }, [activeSubTab]);
-
-  useEffect(() => {
-    const loadEmpresas = async () => {
-      try {
-        const res = await fetch('/api/integration/bom-controle/empresas/pesquisar?pesquisa=');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            const mapped = data.map((emp: any) => ({
-              id: String(emp.Id || emp.id),
-              nome: emp.Nome || emp.RazaoSocial || emp.NomeFantasia || `Empresa ${emp.Id || emp.id}`
-            }));
-            setEmpresasLoaded(mapped);
-          }
-        }
-      } catch (err) {
-        console.error('Erro ao carregar nomes das empresas:', err);
-      }
-    };
-    loadEmpresas();
-  }, []);
 
   const handleToggleSelectFatura = (id: string | number) => {
     setSelectedFaturas(prev => ({
@@ -1235,6 +1234,67 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   </div>
                   <span className="block text-[9px] text-gray-400 pt-1">Eles serão substituídos automaticamente pelos dados reais da fatura.</span>
                 </div>
+              </div>
+
+              {/* Seção: Configuração de Envio Automático */}
+              <div className="border-t border-gray-100 pt-4 space-y-4">
+                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4 text-indigo-500 animate-pulse" />
+                  Agendamento / Envio Automático
+                </h4>
+
+                {/* Checkbox Ativar Envio */}
+                <div className="flex items-center gap-2 bg-indigo-50/40 p-3 rounded-lg border border-indigo-100/50">
+                  <input
+                    type="checkbox"
+                    id="auto_send_enabled"
+                    checked={!!integrationSettings.auto_send_enabled}
+                    onChange={(e) => setIntegrationSettings({ ...integrationSettings, auto_send_enabled: e.target.checked })}
+                    className="rounded border-gray-300 text-indigo-650 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                  />
+                  <label htmlFor="auto_send_enabled" className="text-xs font-bold text-gray-700 cursor-pointer select-none">
+                    Ativar Envio Automático Mensal
+                  </label>
+                </div>
+
+                {integrationSettings.auto_send_enabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-gray-50 p-3 rounded-lg border border-gray-150 animate-fadeIn">
+                    {/* Dia do Mês */}
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase">Dia do Mês para Disparo</label>
+                      <select
+                        value={integrationSettings.auto_send_day || 10}
+                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, auto_send_day: Number(e.target.value) })}
+                        className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none font-bold"
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                          <option key={day} value={day}>
+                            Dia {day}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="block text-[9px] text-gray-400">O sistema disparará automaticamente as faturas geradas neste dia.</span>
+                    </div>
+
+                    {/* Qual Empresa */}
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase">Buscar Boletos da Empresa</label>
+                      <select
+                        value={integrationSettings.auto_send_company_id || ''}
+                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, auto_send_company_id: e.target.value })}
+                        className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none font-bold"
+                      >
+                        <option value="all">Todas as Empresas</option>
+                        {empresasLoaded.map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.nome}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="block text-[9px] text-gray-400">Filtra as faturas pertencentes à empresa escolhida.</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Botão de Gravação de Integrações */}
