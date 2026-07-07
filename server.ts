@@ -366,6 +366,51 @@ async function startServer() {
     }
   });
 
+  // Busca faturas do Bom Controle por intervalo de data (ListarPorPeriodo)
+  app.get('/api/integration/bom-controle/faturas', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+
+      const { dataInicio, dataFim } = req.query;
+      if (!dataInicio || !dataFim) {
+        return res.status(400).json({ error: 'Os parâmetros dataInicio e dataFim são obrigatórios (formato YYYY-MM-DD).' });
+      }
+
+      // Prepara os parâmetros usando múltiplos nomes comuns para garantir compatibilidade
+      const params = new URLSearchParams();
+      params.append('dataInicio', dataInicio as string);
+      params.append('dataFim', dataFim as string);
+      params.append('dataInicial', dataInicio as string);
+      params.append('dataFinal', dataFim as string);
+      params.append('inicio', dataInicio as string);
+      params.append('fim', dataFim as string);
+
+      const url = `https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/ListarPorPeriodo?${params.toString()}`;
+      console.log(`[Bom Controle API] Requisitando período: ${url}`);
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`,
+          'Accept': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle: ${response.status} - ${errorText}` });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao buscar faturas por período no Bom Controle.' });
+    }
+  });
+
   // Envia mensagem via Whaticket
   app.post('/api/integration/whaticket/send', async (req, res) => {
     try {

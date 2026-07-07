@@ -50,6 +50,100 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [fetchedFatura, setFetchedFatura] = useState<any | null>(null);
   const [faturaError, setFaturaError] = useState<string | null>(null);
 
+  // Estados adicionais para busca por período de faturas
+  const [faturaSearchMode, setFaturaSearchMode] = useState<'id' | 'periodo'>('id');
+  const [startDate, setStartDate] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    return `${yyyy}-${mm}-01`;
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  });
+  const [faturasList, setFaturasList] = useState<any[] | null>(null);
+  const [faturasListLoading, setFaturasListLoading] = useState(false);
+  const [faturasListError, setFaturasListError] = useState<string | null>(null);
+
+  const handleSearchFaturasByPeriod = async () => {
+    if (!startDate || !endDate) {
+      setFaturasListError('Por favor, informe as datas de início e fim.');
+      return;
+    }
+    try {
+      setFaturasListLoading(true);
+      setFaturasListError(null);
+      setFaturasList(null);
+      
+      const res = await fetch(`/api/integration/bom-controle/faturas?dataInicio=${startDate}&dataFim=${endDate}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro ao buscar faturas (${res.status})`);
+      }
+      
+      const data = await res.json();
+      setFaturasList(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setFaturasListError(err.message || 'Erro ao carregar lista de faturas.');
+    } finally {
+      setFaturasListLoading(false);
+    }
+  };
+
+  const handleSelectFaturaById = async (id: string | number) => {
+    try {
+      setFaturaLoading(true);
+      setFaturaError(null);
+      setFetchedFatura(null);
+      
+      const res = await fetch(`/api/integration/bom-controle/fatura/${id}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Fatura não encontrada ou erro ${res.status}`);
+      }
+      const data = await res.json();
+      setFetchedFatura(data);
+
+      const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+      
+      let vencimento = 'N/A';
+      if (data.Vencimento) {
+        try {
+          const date = new Date(data.Vencimento);
+          vencimento = date.toLocaleDateString('pt-BR');
+        } catch (e) {}
+      }
+
+      const link = data.LinkBoleto || '';
+
+      let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+      msg = msg.replace('{valor}', valor)
+               .replace('{vencimento}', vencimento)
+               .replace('{link_boleto}', link);
+
+      setWhatsAppMessage(msg);
+
+      if (data.Cliente?.Celular) {
+        let phone = data.Cliente.Celular;
+        phone = phone.replace(/\D/g, '');
+        if (phone.length > 0 && !phone.startsWith('55')) {
+          phone = '55' + phone;
+        }
+        setWhatsAppNumber(phone);
+      } else {
+        setWhatsAppNumber('55');
+      }
+    } catch (err: any) {
+      setFaturaError(err.message || 'Erro ao carregar detalhes da fatura selecionada.');
+    } finally {
+      setFaturaLoading(false);
+    }
+  };
+
   const [whatsAppNumber, setWhatsAppNumber] = useState('');
   const [whatsAppMessage, setWhatsAppMessage] = useState('');
   const [sendLoading, setSendLoading] = useState(false);
@@ -786,34 +880,165 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   </a>
                 </div>
 
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="number"
-                      value={testFaturaId}
-                      onChange={(e) => setTestFaturaId(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearchFatura(); }}
-                      placeholder="Ex: 1"
-                      className="block w-full rounded-lg border border-gray-300 pl-3 pr-10 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
-                    />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400 text-xs">
-                      ID
-                    </div>
-                  </div>
+                {/* Abas de Modo de Busca */}
+                <div className="flex border-b border-gray-100 pb-1.5 mb-3 gap-4">
                   <button
-                    onClick={handleSearchFatura}
-                    disabled={faturaLoading}
-                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-colors shadow-sm disabled:bg-orange-350 flex items-center gap-1.5"
+                    onClick={() => setFaturaSearchMode('id')}
+                    className={`pb-1 text-xs font-bold transition-colors border-b-2 -mb-2 ${
+                      faturaSearchMode === 'id'
+                        ? 'border-orange-500 text-orange-600'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                    }`}
                   >
-                    <RefreshCw className={`h-3.5 w-3.5 ${faturaLoading ? 'animate-spin' : ''}`} />
-                    {faturaLoading ? 'Buscando...' : 'Buscar Fatura'}
+                    Buscar por ID
+                  </button>
+                  <button
+                    onClick={() => setFaturaSearchMode('periodo')}
+                    className={`pb-1 text-xs font-bold transition-colors border-b-2 -mb-2 ${
+                      faturaSearchMode === 'periodo'
+                        ? 'border-orange-500 text-orange-600'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    Buscar por Período de Data
                   </button>
                 </div>
+
+                {faturaSearchMode === 'id' ? (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        value={testFaturaId}
+                        onChange={(e) => setTestFaturaId(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSearchFatura(); }}
+                        placeholder="Ex: 100"
+                        className="block w-full rounded-lg border border-gray-300 pl-3 pr-10 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                      />
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400 text-xs">
+                        ID
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleSearchFatura}
+                      disabled={faturaLoading}
+                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-colors shadow-sm disabled:bg-orange-350 flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${faturaLoading ? 'animate-spin' : ''}`} />
+                      {faturaLoading ? 'Buscando...' : 'Buscar Fatura'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 bg-gray-50/50 p-3 rounded-lg border border-gray-150">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Data Início</label>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Data Fim</label>
+                        <input
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleSearchFaturasByPeriod}
+                      disabled={faturasListLoading}
+                      className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-colors shadow-sm disabled:bg-orange-350 flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${faturasListLoading ? 'animate-spin' : ''}`} />
+                      {faturasListLoading ? 'Buscando faturas...' : 'Buscar Faturas por Período'}
+                    </button>
+                  </div>
+                )}
 
                 {faturaError && (
                   <div className="rounded-lg bg-orange-50 p-3 border border-orange-200 text-orange-800 text-xs flex items-center gap-2">
                     <AlertCircle className="h-4 w-4 shrink-0 text-orange-600" />
                     <span>{faturaError}</span>
+                  </div>
+                )}
+
+                {/* Lista de Faturas Encontradas por Período */}
+                {faturaSearchMode === 'periodo' && faturasListError && (
+                  <div className="rounded-lg bg-red-50 p-3 border border-red-200 text-red-800 text-xs flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+                    <span>{faturasListError}</span>
+                  </div>
+                )}
+
+                {faturaSearchMode === 'periodo' && faturasList && (
+                  <div className="border border-gray-150 rounded-lg overflow-hidden bg-white shadow-xs">
+                    <div className="bg-gray-50 px-3 py-2 border-b border-gray-150 flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                        Faturas Encontradas ({faturasList.length})
+                      </span>
+                      {faturasList.length > 0 && (
+                        <span className="text-[9px] text-gray-400">Clique em "Selecionar" para carregar</span>
+                      )}
+                    </div>
+                    
+                    {faturasList.length === 0 ? (
+                      <div className="p-6 text-center text-xs text-gray-400">
+                        Nenhuma fatura encontrada para o período selecionado.
+                      </div>
+                    ) : (
+                      <div className="max-h-[220px] overflow-y-auto divide-y divide-gray-100">
+                        {faturasList.map((f: any) => {
+                          const isSelected = fetchedFatura && fetchedFatura.Id === f.Id;
+                          return (
+                            <div 
+                              key={f.Id} 
+                              className={`p-3 flex items-center justify-between gap-3 text-xs transition-colors ${
+                                isSelected ? 'bg-indigo-50/50' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1 space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-mono font-bold text-indigo-850">#{f.Id}</span>
+                                  <span className="font-bold text-gray-800 truncate max-w-[150px] md:max-w-[200px]">
+                                    {f.Cliente?.Nome || f.NomeCliente || 'Cliente Não Informado'}
+                                  </span>
+                                  <span className={`inline-block text-[8px] font-bold px-1.5 py-0.2 rounded-full ${
+                                    f.Quitada 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    {f.Quitada ? 'Quitada' : 'Pendente'}
+                                  </span>
+                                </div>
+                                <div className="flex gap-4 text-[10px] text-gray-400 font-mono">
+                                  <span>Venc: {f.Vencimento ? new Date(f.Vencimento).toLocaleDateString('pt-BR') : 'N/A'}</span>
+                                  <span className="font-bold text-indigo-600">
+                                    {f.Valor !== undefined ? `R$ ${Number(f.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'R$ 0,00'}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleSelectFaturaById(f.Id)}
+                                disabled={faturaLoading}
+                                className={`px-2.5 py-1 text-[10px] font-bold rounded-md border transition-colors ${
+                                  isSelected
+                                    ? 'bg-indigo-650 text-white border-indigo-650'
+                                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                }`}
+                              >
+                                {faturaLoading && fetchedFatura?.Id === f.Id ? 'Carregando...' : 'Selecionar'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
