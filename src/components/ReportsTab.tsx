@@ -44,6 +44,7 @@ export const ReportsTab: React.FC = () => {
   const [reportClient, setReportClient] = useState('');
   const [reportStatus, setReportStatus] = useState<'todos' | 'PAGO' | 'PENDENTE' | 'CANCELADO'>('todos');
   const [reportType, setReportType] = useState<'todos' | 'RECIBO' | 'ORCAMENTO'>('todos');
+  const [reportFormat, setReportFormat] = useState<'sintetico' | 'analitico'>('sintetico');
   const [showPrintModal, setShowPrintModal] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -439,7 +440,7 @@ export const ReportsTab: React.FC = () => {
             </div>
 
             {/* Painel de Filtros */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-150">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 bg-gray-50/50 p-4 rounded-xl border border-gray-150">
               {/* Data Inicial */}
               <div className="space-y-1">
                 <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Data Inicial</label>
@@ -491,6 +492,19 @@ export const ReportsTab: React.FC = () => {
                 </select>
               </div>
 
+              {/* Formato do Relatório */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">Formato</label>
+                <select
+                  value={reportFormat}
+                  onChange={(e) => setReportFormat(e.target.value as any)}
+                  className="block w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 focus:border-blue-500 focus:outline-none font-semibold"
+                >
+                  <option value="sintetico">Sintético</option>
+                  <option value="analitico">Analítico</option>
+                </select>
+              </div>
+
               {/* Limpar Filtros */}
               <div className="flex items-end">
                 <button
@@ -500,6 +514,7 @@ export const ReportsTab: React.FC = () => {
                     setReportClient('');
                     setReportStatus('todos');
                     setReportType('todos');
+                    setReportFormat('sintetico');
                   }}
                   className="w-full px-4 py-2 border border-gray-200 text-gray-500 hover:text-gray-700 hover:bg-gray-100 text-xs font-bold rounded-lg transition-colors cursor-pointer"
                 >
@@ -545,36 +560,66 @@ export const ReportsTab: React.FC = () => {
                     </tr>
                   ) : (
                     filteredDocuments.map((doc) => (
-                      <tr key={doc.id} className="hover:bg-gray-50/30 font-medium">
-                        <td className="px-5 py-3 font-mono font-bold text-gray-900">
-                          #{doc.number}
-                        </td>
-                        <td className="px-5 py-3 text-[10px] font-extrabold uppercase">
-                          <span className={`px-1.5 py-0.5 rounded ${
-                            doc.type === 'RECIBO' ? 'bg-blue-50 text-blue-800' : 'bg-teal-50 text-teal-850'
-                          }`}>
-                            {doc.type}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 text-gray-850 truncate max-w-[200px]" title={doc.client_name}>
-                          {doc.client_name}
-                        </td>
-                        <td className="px-5 py-3 text-center text-gray-450">
-                          {new Date(doc.issue_date).toLocaleDateString('pt-BR')}
-                        </td>
-                        <td className="px-5 py-3 font-mono text-[10px]">{doc.payment_method || 'PIX'}</td>
-                        <td className="px-5 py-3 text-center">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${
-                            doc.status === 'PAGO' ? 'bg-green-100 text-green-800' :
-                            doc.status === 'PENDENTE' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {doc.status}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3 text-right font-black text-blue-950">
-                          {formatBRL(doc.total)}
-                        </td>
-                      </tr>
+                      <React.Fragment key={doc.id}>
+                        <tr className="hover:bg-gray-50/30 font-medium">
+                          <td className="px-5 py-3 font-mono font-bold text-gray-900">
+                            #{doc.number}
+                          </td>
+                          <td className="px-5 py-3 text-[10px] font-extrabold uppercase">
+                            <span className={`px-1.5 py-0.5 rounded ${
+                              doc.type === 'RECIBO' ? 'bg-blue-50 text-blue-800' : 'bg-teal-50 text-teal-850'
+                            }`}>
+                              {doc.type}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-gray-850 truncate max-w-[200px]" title={doc.client_name}>
+                            {doc.client_name}
+                          </td>
+                          <td className="px-5 py-3 text-center text-gray-450">
+                            {new Date(doc.issue_date).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="px-5 py-3 font-mono text-[10px]">{doc.payment_method || 'PIX'}</td>
+                          <td className="px-5 py-3 text-center">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${
+                              doc.status === 'PAGO' ? 'bg-green-100 text-green-800' :
+                              doc.status === 'PENDENTE' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'
+                            }`}>
+                              {doc.status}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-right font-black text-blue-950">
+                            {formatBRL(doc.total)}
+                          </td>
+                        </tr>
+                        {reportFormat === 'analitico' && doc.items && doc.items.length > 0 && (
+                          <tr className="bg-slate-50/30">
+                            <td colSpan={7} className="px-5 py-2 pb-3">
+                              <div className="border border-gray-150 rounded-lg overflow-hidden bg-white max-w-4xl ml-6 mr-6">
+                                <table className="min-w-full divide-y divide-gray-100 text-[11px]">
+                                  <thead className="bg-gray-50 text-gray-400 font-extrabold uppercase text-[9px] tracking-wider">
+                                    <tr>
+                                      <th className="px-4 py-1.5 text-left">Item / Descrição</th>
+                                      <th className="px-4 py-1.5 text-center w-24">Qtd</th>
+                                      <th className="px-4 py-1.5 text-right w-32">Valor Unitário</th>
+                                      <th className="px-4 py-1.5 text-right w-32">Subtotal</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 text-gray-650">
+                                    {doc.items.map((item, idx) => (
+                                      <tr key={idx} className="hover:bg-gray-50/30">
+                                        <td className="px-4 py-1.5 font-medium">{item.description}</td>
+                                        <td className="px-4 py-1.5 text-center font-mono font-bold text-gray-700">{item.quantity}</td>
+                                        <td className="px-4 py-1.5 text-right font-mono">{formatBRL(item.unit_price)}</td>
+                                        <td className="px-4 py-1.5 text-right font-mono font-bold text-gray-900">{formatBRL(item.total_price)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))
                   )}
                 </tbody>
@@ -665,7 +710,7 @@ export const ReportsTab: React.FC = () => {
                   </div>
 
                   {/* Filtros Aplicados */}
-                  <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-6 grid grid-cols-4 gap-4 text-[10px] text-gray-600 leading-normal">
+                  <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 mb-6 grid grid-cols-5 gap-4 text-[10px] text-gray-600 leading-normal">
                     <div>
                       <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-wider">Período</span>
                       <span className="font-bold text-gray-800">
@@ -694,6 +739,12 @@ export const ReportsTab: React.FC = () => {
                         {reportType === 'todos' ? 'Todos os Tipos' : reportType}
                       </span>
                     </div>
+                    <div>
+                      <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-wider">Formato</span>
+                      <span className="font-bold text-gray-800 uppercase">
+                        {reportFormat === 'analitico' ? 'Analítico' : 'Sintético'}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Tabela de Lançamentos */}
@@ -719,29 +770,59 @@ export const ReportsTab: React.FC = () => {
                           </tr>
                         ) : (
                           filteredDocuments.map((doc) => (
-                            <tr key={doc.id} className="hover:bg-gray-50/20 h-6.5">
-                              <td className="p-2 border-r border-gray-300 font-mono font-bold text-gray-950">
-                                #{doc.number}
-                              </td>
-                              <td className="p-2 border-r border-gray-300 text-[9px] font-black uppercase">
-                                {doc.type}
-                              </td>
-                              <td className="p-2 border-r border-gray-300 truncate max-w-[200px]" title={doc.client_name}>
-                                {doc.client_name}
-                              </td>
-                              <td className="p-2 border-r border-gray-300 text-center text-gray-600 font-mono">
-                                {new Date(doc.issue_date).toLocaleDateString('pt-BR')}
-                              </td>
-                              <td className="p-2 border-r border-gray-300 truncate text-[9px] font-mono">
-                                {doc.payment_method || 'PIX'}
-                              </td>
-                              <td className="p-2 border-r border-gray-300 text-center font-extrabold uppercase text-[9px]">
-                                {doc.status}
-                              </td>
-                              <td className="p-2 text-right font-black text-gray-950">
-                                {formatBRL(doc.total)}
-                              </td>
-                            </tr>
+                            <React.Fragment key={doc.id}>
+                              <tr className="hover:bg-gray-50/20 h-6.5">
+                                <td className="p-2 border-r border-gray-300 font-mono font-bold text-gray-950">
+                                  #{doc.number}
+                                </td>
+                                <td className="p-2 border-r border-gray-300 text-[9px] font-black uppercase">
+                                  {doc.type}
+                                </td>
+                                <td className="p-2 border-r border-gray-300 truncate max-w-[200px]" title={doc.client_name}>
+                                  {doc.client_name}
+                                </td>
+                                <td className="p-2 border-r border-gray-300 text-center text-gray-600 font-mono">
+                                  {new Date(doc.issue_date).toLocaleDateString('pt-BR')}
+                                </td>
+                                <td className="p-2 border-r border-gray-300 truncate text-[9px] font-mono">
+                                  {doc.payment_method || 'PIX'}
+                                </td>
+                                <td className="p-2 border-r border-gray-300 text-center font-extrabold uppercase text-[9px]">
+                                  {doc.status}
+                                </td>
+                                <td className="p-2 text-right font-black text-gray-950">
+                                  {formatBRL(doc.total)}
+                                </td>
+                              </tr>
+                              {reportFormat === 'analitico' && doc.items && doc.items.length > 0 && (
+                                <tr className="bg-gray-50/50 no-break-inside">
+                                  <td colSpan={7} className="p-2 pl-6 pb-2.5">
+                                    <div className="border border-gray-300 rounded overflow-hidden bg-white">
+                                      <table className="w-full divide-y divide-gray-200 text-[8.5px]">
+                                        <thead className="bg-gray-100 text-gray-700 font-black uppercase text-[7.5px] tracking-wider">
+                                          <tr>
+                                            <th className="p-1 text-left pl-2">Descrição do Item / Produto</th>
+                                            <th className="p-1 text-center w-16">Qtd</th>
+                                            <th className="p-1 text-right w-24">Preço Unitário</th>
+                                            <th className="p-1 text-right w-24 pr-2">Subtotal</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-150 text-gray-800 font-medium">
+                                          {doc.items.map((item, idx) => (
+                                            <tr key={idx}>
+                                              <td className="p-1 pl-2">{item.description}</td>
+                                              <td className="p-1 text-center font-mono font-bold">{item.quantity}</td>
+                                              <td className="p-1 text-right font-mono">{formatBRL(item.unit_price)}</td>
+                                              <td className="p-1 text-right font-mono font-black text-gray-950 pr-2">{formatBRL(item.total_price)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
                           ))
                         )}
                       </tbody>
