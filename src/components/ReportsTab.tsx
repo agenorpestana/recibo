@@ -271,7 +271,8 @@ export const ReportsTab: React.FC = () => {
 
       {subTab === 'financial' ? (
         <>
-          {/* Bento Grid de Indicadores Principais Financeiros */}
+          <div className="no-print space-y-6">
+            {/* Bento Grid de Indicadores Principais Financeiros */}
           {stats && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in duration-200">
               <div className="bg-white p-5 rounded-xl border border-gray-150 shadow-sm flex items-start justify-between">
@@ -646,12 +647,13 @@ export const ReportsTab: React.FC = () => {
               </div>
             </div>
           </div>
+          </div>
 
           {/* Modal de Impressão A4 */}
           {showPrintModal && (
-            <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 overflow-y-auto flex flex-col justify-start no-print animate-in fade-in duration-200">
+            <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 overflow-y-auto flex flex-col justify-start animate-in fade-in duration-200 print-modal-backdrop print:relative print:inset-auto print:bg-white print:p-0 print:overflow-visible print:z-0">
               {/* Barra de Ferramentas */}
-              <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between sticky top-0 shadow-md select-none z-50">
+              <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between sticky top-0 shadow-md select-none z-50 no-print">
                 <div className="flex items-center gap-2.5">
                   <div className="bg-blue-600 rounded-lg p-1.5 text-white">
                     <Printer className="h-5 w-5" />
@@ -680,8 +682,8 @@ export const ReportsTab: React.FC = () => {
               </div>
 
               {/* Área do Relatório A4 */}
-              <div className="flex-1 py-10 px-4 bg-slate-100 flex justify-center selection:bg-blue-100">
-                <div className="print-area bg-white text-gray-950 p-12 border border-gray-200 w-full max-w-[850px] min-h-[1100px] shadow-2xl flex flex-col font-sans select-text leading-relaxed">
+              <div className="flex-1 py-10 px-4 bg-slate-100 flex justify-center selection:bg-blue-100 print:py-0 print:px-0 print:bg-white">
+                <div className="print-area bg-white text-gray-950 p-12 border border-gray-200 w-full max-w-[850px] min-h-[1100px] shadow-2xl flex flex-col font-sans select-text leading-relaxed print:p-8 print:border-none print:shadow-none">
                   
                   {/* Cabeçalho da Empresa */}
                   <div className="flex justify-between items-start border-b-2 border-gray-900 pb-5 mb-6">
@@ -872,7 +874,7 @@ export const ReportsTab: React.FC = () => {
           )}
         </>
       ) : (
-        <>
+        <div className="no-print space-y-6">
           {/* Bento Grid do Estoque */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in duration-200">
             <div className="bg-white p-5 rounded-xl border border-gray-150 shadow-sm flex items-start justify-between">
@@ -1094,7 +1096,7 @@ export const ReportsTab: React.FC = () => {
               </table>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
