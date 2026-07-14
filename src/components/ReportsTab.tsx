@@ -234,7 +234,7 @@ export const ReportsTab: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-gray-100 pb-4 gap-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-gray-100 pb-4 gap-4 no-print">
         <div>
           <h2 className="text-xl font-bold text-gray-850">Relatórios Gerenciais Inteligentes</h2>
           <p className="text-xs text-gray-500">
