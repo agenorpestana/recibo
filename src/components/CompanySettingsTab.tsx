@@ -1397,6 +1397,17 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                 </div>
 
                 <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">Nome do Beneficiário (Razão Social)</label>
+                  <input
+                    type="text"
+                    value={integrationSettings.bradesco_beneficiario_nome || ''}
+                    onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_beneficiario_nome: e.target.value })}
+                    placeholder="Nome da empresa do Beneficiário"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-1">
                   <label className="block text-[10px] font-bold text-gray-500 uppercase">CNPJ do Beneficiário</label>
                   <input
                     type="text"

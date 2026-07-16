@@ -369,11 +369,11 @@ async function startServer() {
           const clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
           
           fatura.Cliente = {
+            ...clientData,
             Id: idCliente,
             Nome: clientName || fatura.Cliente?.Nome || 'Cliente Não Informado',
             CnpjCpf: clientDoc || fatura.Cliente?.CnpjCpf || 'N/A',
-            Celular: clientCel || fatura.Cliente?.Celular || '',
-            ...clientData
+            Celular: clientCel || fatura.Cliente?.Celular || ''
           };
         }
       } catch (err) {
@@ -400,10 +400,10 @@ async function startServer() {
           if (Array.isArray(companies) && companies.length > 0) {
             const matchedCompany = companies.find((c: any) => String(c.Id) === String(idEmpresa)) || companies[0];
             fatura.Empresa = {
+              ...matchedCompany,
               Id: idEmpresa,
               Nome: matchedCompany.Nome || matchedCompany.RazaoSocial || 'Empresa Não Informada',
-              Cnpj: matchedCompany.Cnpj || matchedCompany.CnpjCpf || 'N/A',
-              ...matchedCompany
+              Cnpj: matchedCompany.Cnpj || matchedCompany.CnpjCpf || 'N/A'
             };
           }
         }
@@ -731,7 +731,7 @@ async function startServer() {
     const ag = agencia.replace(/\D/g, '').padStart(4, '0');
     const cart = carteira.replace(/\D/g, '').padStart(2, '0');
     const nn = nossoNumero.replace(/\D/g, '').padStart(11, '0');
-    const cc = conta.replace(/\D/g, '').padStart(7, '0');
+    const cc = conta.split('-')[0].replace(/\D/g, '').padStart(7, '0');
 
     const campoLivre = ag + cart + nn + cc + '0';
 
@@ -856,11 +856,19 @@ async function startServer() {
       const certContent = settings.bradesco_cert;
       const keyContent = settings.bradesco_key;
 
+      if (!clientId || !clientSecret || !certContent || !keyContent) {
+        return res.status(400).json({
+          success: false,
+          error: 'As credenciais da API Bradesco (Client ID, Client Secret, Certificado Público .pem e Chave Privada) não estão configuradas ou estão incompletas. Por favor, preencha-as nas configurações de integração antes de prosseguir.'
+        });
+      }
+
       const agency = settings.bradesco_agency || '0123';
       const account = settings.bradesco_account || '0123456';
       const accountDigit = settings.bradesco_account_digit || '7';
       const wallet = settings.bradesco_wallet || '09';
       const cnpjBeneficiario = settings.bradesco_cnpj || companySettings.cnpj || '44.285.891/0001-45';
+      const beneficiario = settings.bradesco_beneficiario_nome || companySettings.company_name || 'UNITY AUTOMACOES LTDA.';
 
       // Dados da Fatura
       const faturaId = fatura.Id || fatura.id || Math.floor(Math.random() * 100000);
@@ -908,135 +916,134 @@ async function startServer() {
       // Gerar linha digitável e código de barras real/calculado
       const { linhaDigitavel, barcode } = getBradescoLinha(valor, vencimento, nossoNumero, agency, account, wallet);
 
-      // Se possui mTLS configurado, podemos tentar a chamada real de mTLS
-      let realApiSucceeded = false;
+      // Executa chamada real de mTLS
       let apiLog = '';
 
-      if (clientId && clientSecret && certContent && keyContent) {
-        try {
-          console.log(`[Bradesco API mTLS] Iniciando autenticação em ambiente: ${env.toUpperCase()}`);
-          
-          const tokenHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-          const tokenPath = '/auth/server-mtls/v2/token';
+      try {
+        console.log(`[Bradesco API mTLS] Iniciando autenticação em ambiente: ${env.toUpperCase()}`);
+        
+        const tokenHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+        const tokenPath = '/auth/server-mtls/v2/token';
 
-          const authBody = querystring.stringify({
-            grant_type: 'client_credentials',
-            client_id: clientId,
-            client_secret: clientSecret
-          });
+        const authBody = querystring.stringify({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret
+        });
 
-          // Requisição mTLS para obter Token
-          const tokenRes: any = await new Promise((resolve, reject) => {
-            const reqOpts = {
-              hostname: tokenHost,
-              port: 443,
-              path: tokenPath,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(authBody)
-              },
-              cert: certContent,
-              key: keyContent,
-              rejectUnauthorized: false // Permite conexões locais/sandbox sem validar a cadeia raiz estrita
-            };
+        // Requisição mTLS para obter Token
+        const tokenRes: any = await new Promise((resolve, reject) => {
+          const reqOpts = {
+            hostname: tokenHost,
+            port: 443,
+            path: tokenPath,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(authBody)
+            },
+            cert: certContent,
+            key: keyContent,
+            rejectUnauthorized: false // Permite conexões locais/sandbox sem validar a cadeia raiz estrita
+          };
 
-            const req = https.request(reqOpts, (res) => {
-              let data = '';
-              res.on('data', (chunk) => { data += chunk; });
-              res.on('end', () => {
-                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                  try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
-                } else {
-                  reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
-                }
-              });
-            });
-
-            req.on('error', (e) => reject(e));
-            req.write(authBody);
-            req.end();
-          });
-
-          const accessToken = tokenRes.access_token;
-          if (accessToken) {
-            console.log('[Bradesco API mTLS] Bearer Token obtido com sucesso!');
-            
-            // Payload de Registro do Boleto Bradesco Oficial
-            const registerPayload = {
-              nuCnpjBeneficiario: cnpjBeneficiario.replace(/\D/g, ''),
-              nuAgenciaBeneficiario: Number(agency.replace(/\D/g, '')),
-              nuContaBeneficiario: Number(account.replace(/\D/g, '')),
-              nuDigitoContaBeneficiario: accountDigit,
-              idCarteira: Number(wallet.replace(/\D/g, '')),
-              nuBoleto: nossoNumero,
-              dtEmissao: emissao.split('-').reverse().join('.'), // DD.MM.YYYY
-              dtVencimento: vencimento.split('-').reverse().join('.'),
-              vlNominal: Math.round(valor * 100), // Em centavos
-              pagador: {
-                noPagador: pagadorNome.substring(0, 40),
-                nuCpfCnpjPagador: pagadorDoc.replace(/\D/g, ''),
-                nuCep: pagadorCep.replace(/\D/g, ''),
-                noLogradouro: pagadorEnd.substring(0, 40),
-                nuLogradouro: "S/N",
-                noBairro: "Centro",
-                noCidade: pagadorObj.Cidade || "Itamaraju",
-                noUf: pagadorObj.Estado || pagadorObj.Uf || "BA"
+          const req = https.request(reqOpts, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+              } else {
+                reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
               }
-            };
-
-            const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-            const registerPath = '/v1/boleto/registrar';
-
-            // Chamada de registro mTLS
-            const regRes: any = await new Promise((resolve, reject) => {
-              const reqOpts = {
-                hostname: registerHost,
-                port: 443,
-                path: registerPath,
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${accessToken}`
-                },
-                cert: certContent,
-                key: keyContent,
-                rejectUnauthorized: false
-              };
-
-              const req = https.request(reqOpts, (res) => {
-                let data = '';
-                res.on('data', (chunk) => { data += chunk; });
-                res.on('end', () => {
-                  if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                    try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
-                  } else {
-                    reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
-                  }
-                });
-              });
-
-              req.on('error', (e) => reject(e));
-              req.write(JSON.stringify(registerPayload));
-              req.end();
             });
+          });
 
-            console.log('[Bradesco API mTLS] Boleto registrado via API oficial com sucesso!');
-            realApiSucceeded = true;
-            apiLog = 'Registrado via API Bradesco Oficial com mTLS.';
-          }
-        } catch (apiError: any) {
-          console.warn('[Bradesco API mTLS] Falha no fluxo mTLS real, usando fallback de alta fidelidade:', apiError.message);
-          apiLog = `Chamada mTLS tentada, mas falhou: ${apiError.message}. Iniciado Fallback Seguro.`;
+          req.on('error', (e) => reject(e));
+          req.write(authBody);
+          req.end();
+        });
+
+        const accessToken = tokenRes.access_token;
+        if (!accessToken) {
+          throw new Error('access_token não retornado no corpo da resposta de autenticação.');
         }
-      } else {
-        apiLog = 'Ambiente de testes/Sandbox ou credenciais de mTLS incompletas. Simulador ativo.';
+
+        console.log('[Bradesco API mTLS] Bearer Token obtido com sucesso!');
+        
+        // Payload de Registro do Boleto Bradesco Oficial
+        const registerPayload = {
+          nuCnpjBeneficiario: cnpjBeneficiario.replace(/\D/g, ''),
+          nuAgenciaBeneficiario: Number(agency.replace(/\D/g, '')),
+          nuContaBeneficiario: Number(account.replace(/\D/g, '')),
+          nuDigitoContaBeneficiario: accountDigit,
+          idCarteira: Number(wallet.replace(/\D/g, '')),
+          nuBoleto: nossoNumero,
+          dtEmissao: emissao.split('-').reverse().join('.'), // DD.MM.YYYY
+          dtVencimento: vencimento.split('-').reverse().join('.'),
+          vlNominal: Math.round(valor * 100), // Em centavos
+          pagador: {
+            noPagador: pagadorNome.substring(0, 40),
+            nuCpfCnpjPagador: pagadorDoc.replace(/\D/g, ''),
+            nuCep: pagadorCep.replace(/\D/g, ''),
+            noLogradouro: pagadorEnd.substring(0, 40),
+            nuLogradouro: "S/N",
+            noBairro: "Centro",
+            noCidade: pagadorObj.Cidade || "Itamaraju",
+            noUf: pagadorObj.Estado || pagadorObj.Uf || "BA"
+          }
+        };
+
+        const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+        const registerPath = '/v1/boleto/registrar';
+
+        // Chamada de registro mTLS
+        const regRes: any = await new Promise((resolve, reject) => {
+          const reqOpts = {
+            hostname: registerHost,
+            port: 443,
+            path: registerPath,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`
+            },
+            cert: certContent,
+            key: keyContent,
+            rejectUnauthorized: false
+          };
+
+          const req = https.request(reqOpts, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+              } else {
+                reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
+              }
+            });
+          });
+
+          req.on('error', (e) => reject(e));
+          req.write(JSON.stringify(registerPayload));
+          req.end();
+        });
+
+        console.log('[Bradesco API mTLS] Boleto registrado via API oficial com sucesso!');
+        apiLog = 'Registrado com sucesso via API Bradesco Oficial com mTLS.';
+      } catch (apiError: any) {
+        console.error('[Bradesco API mTLS] Erro na integração com a API Bradesco:', apiError.message);
+        return res.status(400).json({
+          success: false,
+          error: `Erro ao registrar boleto na API Bradesco: ${apiError.message}`
+        });
       }
 
       // Retorna os dados do boleto gerado
       res.json({
         success: true,
-        mocked: !realApiSucceeded,
+        mocked: false,
         apiLog,
         env: env,
         boleto: {
@@ -1050,7 +1057,7 @@ async function startServer() {
           conta: `${account}-${accountDigit}`,
           carteira: wallet,
           cnpjBeneficiario,
-          beneficiario: companySettings.company_name || 'UNITY AUTOMACOES LTDA.',
+          beneficiario,
           pagador: {
             nome: pagadorNome,
             documento: pagadorDoc,

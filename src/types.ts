@@ -119,6 +119,7 @@ export interface IntegrationSettings {
   bradesco_account_digit?: string;
   bradesco_wallet?: string;
   bradesco_cnpj?: string;
+  bradesco_beneficiario_nome?: string;
 }
 
 
