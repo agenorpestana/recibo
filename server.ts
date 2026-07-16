@@ -865,15 +865,42 @@ async function startServer() {
       // Dados da Fatura
       const faturaId = fatura.Id || fatura.id || Math.floor(Math.random() * 100000);
       const valor = Number(fatura.ValorOriginal || fatura.Valor || fatura.valor || 100.00);
-      const vencimento = fatura.DataVencimento || fatura.Vencimento || fatura.vencimento || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const emissao = fatura.DataEmissao || fatura.Emissao || fatura.emissao || new Date().toISOString().split('T')[0];
+      const rawVencimento = fatura.DataVencimento || fatura.Vencimento || fatura.vencimento || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const rawEmissao = fatura.DataEmissao || fatura.Emissao || fatura.emissao || new Date().toISOString().split('T')[0];
+      const vencimento = String(rawVencimento).split('T')[0];
+      const emissao = String(rawEmissao).split('T')[0];
 
       // Pagador
       const pagadorObj = fatura.Cliente || fatura.cliente || {};
       const pagadorNome = pagadorObj.NomeRazaoSocial || pagadorObj.Nome || pagadorObj.nome || 'Cliente Desconhecido';
       const pagadorDoc = pagadorObj.CnpjCpf || pagadorObj.cnpj_cpf || '000.000.000-00';
       const pagadorCep = pagadorObj.Cep || pagadorObj.cep || '00000-000';
-      const pagadorEnd = pagadorObj.Endereco || pagadorObj.address || 'Rua não informada';
+      
+      let pagadorEnd = '';
+      if (pagadorObj.Endereco) {
+        if (typeof pagadorObj.Endereco === 'object') {
+          const e = pagadorObj.Endereco;
+          const logradouro = e.Logradouro || e.Rua || e.Street || e.street || '';
+          const numero = e.Numero || e.Number || e.number || '';
+          const bairro = e.Bairro || e.Neighborhood || e.neighborhood || '';
+          const cidade = e.Cidade || e.City || e.city || '';
+          const uf = e.Estado || e.State || e.state || e.Uf || e.uf || '';
+          const parts = [
+            logradouro ? (numero ? `${logradouro}, ${numero}` : logradouro) : '',
+            bairro,
+            cidade ? (uf ? `${cidade}-${uf}` : cidade) : ''
+          ].filter(Boolean);
+          pagadorEnd = parts.join(' - ');
+        } else {
+          pagadorEnd = String(pagadorObj.Endereco);
+        }
+      }
+      if (!pagadorEnd) {
+        pagadorEnd = pagadorObj.address || 'Rua não informada';
+      }
+      if (typeof pagadorEnd === 'object') {
+        pagadorEnd = JSON.stringify(pagadorEnd);
+      }
 
       // Gerar Nosso Número único baseado na Fatura
       const nossoNumero = `09${String(faturaId).padStart(9, '0')}`;
@@ -1057,8 +1084,10 @@ async function startServer() {
       } = req.query;
 
       const vVal = Number(valor || 100.00);
-      const vVenc = String(vencimento || new Date().toISOString().split('T')[0]);
-      const vEmis = String(emissao || new Date().toISOString().split('T')[0]);
+      const rawVenc = String(vencimento || new Date().toISOString().split('T')[0]);
+      const rawEmis = String(emissao || new Date().toISOString().split('T')[0]);
+      const vVenc = rawVenc.split('T')[0];
+      const vEmis = rawEmis.split('T')[0];
       const vNome = String(nome || 'Cliente de Teste');
       const vDoc = String(documento || '00.000.000/0001-00');
       const vEnd = String(endereco || 'Rua de Teste, 123');
@@ -1227,7 +1256,7 @@ async function startServer() {
                 </td>
                 <td>
                   <span class="label">Data Vencimento</span>
-                  <span class="value">${vVenc}</span>
+                  <span class="value">${vencBr}</span>
                 </td>
                 <td>
                   <span class="label">Nosso Número</span>
