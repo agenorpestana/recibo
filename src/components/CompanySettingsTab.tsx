@@ -4,7 +4,7 @@ import {
   Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
   HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
   Search, FileText, Send, Key, RefreshCw, AlertCircle, ExternalLink, 
-  Lock, Settings2, BookOpen, CheckCircle, Smartphone 
+  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard
 } from 'lucide-react';
 
 interface CompanySettingsTabProps {
@@ -49,6 +49,12 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [faturaLoading, setFaturaLoading] = useState(false);
   const [fetchedFatura, setFetchedFatura] = useState<any | null>(null);
   const [faturaError, setFaturaError] = useState<string | null>(null);
+
+  // Estados para geração de Boletos Bradesco
+  const [bradescoBoletoResult, setBradescoBoletoResult] = useState<any | null>(null);
+  const [bradescoGenerating, setBradescoGenerating] = useState(false);
+  const [bradescoError, setBradescoError] = useState<string | null>(null);
+  const [bradescoEnvSelection, setBradescoEnvSelection] = useState<'sandbox' | 'production'>('sandbox');
 
   // Estados adicionais para busca por período de faturas
   const [faturaSearchMode, setFaturaSearchMode] = useState<'id' | 'periodo'>('id');
@@ -187,6 +193,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setFaturaLoading(true);
       setFaturaError(null);
       setFetchedFatura(null);
+      setBradescoBoletoResult(null);
+      setBradescoError(null);
       
       const res = await fetch(`/api/integration/bom-controle/fatura/${id}`);
       if (!res.ok) {
@@ -398,6 +406,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setFaturaLoading(true);
       setFaturaError(null);
       setFetchedFatura(null);
+      setBradescoBoletoResult(null);
+      setBradescoError(null);
       const res = await fetch(`/api/integration/bom-controle/fatura/${testFaturaId}`);
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -442,6 +452,66 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setFaturaError(err.message || 'Erro ao buscar fatura.');
     } finally {
       setFaturaLoading(false);
+    }
+  };
+
+  const handleGerarBoletoBradesco = async () => {
+    if (!fetchedFatura) return;
+    try {
+      setBradescoGenerating(true);
+      setBradescoError(null);
+      setBradescoBoletoResult(null);
+
+      const res = await fetch('/api/integration/bradesco/gerar-boleto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fatura: fetchedFatura,
+          envSelection: bradescoEnvSelection
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro ${res.status} ao gerar boleto.`);
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        setBradescoBoletoResult(data.boleto);
+        const boleto = data.boleto;
+        const bradescoLink = `${window.location.origin}/api/integration/bradesco/visualizar-boleto?` + 
+          `valor=${boleto.valor}` +
+          `&vencimento=${boleto.vencimento}` +
+          `&emissao=${boleto.emissao}` +
+          `&nome=${encodeURIComponent(boleto.pagador.nome)}` +
+          `&documento=${encodeURIComponent(boleto.pagador.documento)}` +
+          `&endereco=${encodeURIComponent(boleto.pagador.endereco)}` +
+          `&cep=${encodeURIComponent(boleto.pagador.cep)}` +
+          `&nosso_numero=${boleto.nossoNumero}` +
+          `&agencia=${boleto.agencia}` +
+          `&conta=${encodeURIComponent(boleto.conta)}` +
+          `&carteira=${boleto.carteira}` +
+          `&beneficiario=${encodeURIComponent(boleto.beneficiario)}` +
+          `&cnpj_beneficiario=${encodeURIComponent(boleto.cnpjBeneficiario)}`;
+
+        let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bradesco no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+        const valorStr = `R$ ${Number(boleto.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+        const vencParts = boleto.vencimento.split('-');
+        const vencStr = vencParts.length === 3 ? `${vencParts[2]}/${vencParts[1]}/${vencParts[0]}` : boleto.vencimento;
+
+        msg = msg.replace('{valor}', valorStr)
+                 .replace('{vencimento}', vencStr)
+                 .replace('{link_boleto}', bradescoLink);
+
+        setWhatsAppMessage(msg);
+      } else {
+        throw new Error(data.error || 'Erro desconhecido ao registrar boleto.');
+      }
+    } catch (err: any) {
+      setBradescoError(err.message || 'Erro ao gerar boleto Bradesco.');
+    } finally {
+      setBradescoGenerating(false);
     }
   };
 
@@ -1236,6 +1306,132 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                 </div>
               </div>
 
+              {/* Seção: Configuração API Boletos Bradesco (mTLS) */}
+              <div className="border-t border-gray-100 pt-4 space-y-4">
+                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <CreditCard className="h-4 w-4 text-red-500 animate-pulse" />
+                  API Boletos Bradesco mTLS
+                </h4>
+
+                {/* Escolha Ambiente */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Ambiente Bradesco</label>
+                    <select
+                      value={integrationSettings.bradesco_env || 'sandbox'}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_env: e.target.value as any })}
+                      className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 bg-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                    >
+                      <option value="sandbox">Sandbox (Testes)</option>
+                      <option value="production">Produção (Real)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Carteira Cobrança</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.bradesco_wallet || '09'}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_wallet: e.target.value })}
+                      placeholder="09"
+                      className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                    />
+                  </div>
+                </div>
+
+                {/* Client ID & Secret */}
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Client ID</label>
+                    <input
+                      type="password"
+                      value={integrationSettings.bradesco_client_id || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_client_id: e.target.value })}
+                      placeholder="Client ID da API Bradesco"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Client Secret</label>
+                    <input
+                      type="password"
+                      value={integrationSettings.bradesco_client_secret || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_client_secret: e.target.value })}
+                      placeholder="Client Secret da API Bradesco"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Agencia, Conta, Dígito, CNPJ */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Agência</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.bradesco_agency || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_agency: e.target.value })}
+                      placeholder="Ex: 1234"
+                      className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Conta</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.bradesco_account || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_account: e.target.value })}
+                      placeholder="Ex: 56789"
+                      className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Dígito</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.bradesco_account_digit || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_account_digit: e.target.value })}
+                      placeholder="0"
+                      className="block w-full rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">CNPJ do Beneficiário</label>
+                  <input
+                    type="text"
+                    value={integrationSettings.bradesco_cnpj || ''}
+                    onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_cnpj: e.target.value })}
+                    placeholder="CNPJ Bradesco Beneficiário"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* mTLS Certificates content */}
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Certificado Público (.pem)</label>
+                    <textarea
+                      rows={2}
+                      value={integrationSettings.bradesco_cert || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_cert: e.target.value })}
+                      placeholder="-----BEGIN CERTIFICATE-----\n..."
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-[9px] font-mono text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Chave Privada (.key)</label>
+                    <textarea
+                      rows={2}
+                      value={integrationSettings.bradesco_key || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_key: e.target.value })}
+                      placeholder="-----BEGIN PRIVATE KEY-----\n..."
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-[9px] font-mono text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Seção: Configuração de Envio Automático */}
               <div className="border-t border-gray-100 pt-4 space-y-4">
                 <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
@@ -1790,6 +1986,102 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         </a>
                       </div>
                     )}
+
+                    {/* Painel Integrado para Geração de Boleto Bradesco */}
+                    <div className="bg-red-50/40 rounded-lg p-3 border border-red-100 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="h-4 w-4 text-red-600" />
+                          <span className="text-xs font-bold text-gray-800">Boleto Bradesco API</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-gray-400 uppercase font-bold">Ambiente:</span>
+                          <select
+                            value={bradescoEnvSelection}
+                            onChange={(e) => setBradescoEnvSelection(e.target.value as any)}
+                            className="bg-white border border-gray-200 rounded text-[10px] font-bold px-1.5 py-0.5 text-gray-700 focus:outline-none"
+                          >
+                            <option value="sandbox">Sandbox</option>
+                            <option value="production">Produção</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {bradescoError && (
+                        <div className="text-[10px] text-red-700 bg-red-100/60 p-2 rounded border border-red-200">
+                          {bradescoError}
+                        </div>
+                      )}
+
+                      {!bradescoBoletoResult ? (
+                        <button
+                          type="button"
+                          disabled={bradescoGenerating}
+                          onClick={handleGerarBoletoBradesco}
+                          className="w-full py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${bradescoGenerating ? 'animate-spin' : ''}`} />
+                          {bradescoGenerating ? 'Registrando Boleto na API Bradesco...' : 'Gerar e Registrar Boleto Bradesco'}
+                        </button>
+                      ) : (
+                        <div className="space-y-2 animate-fadeIn bg-white p-2.5 rounded border border-red-150">
+                          <div className="flex items-center gap-1.5 text-green-700 text-xs font-bold">
+                            <CheckCircle className="h-4 w-4 shrink-0" />
+                            <span>Boleto Bradesco Gerado com Sucesso!</span>
+                          </div>
+                          
+                          <div className="text-[10px] space-y-1 font-mono text-gray-600 bg-gray-50 p-2 rounded">
+                            <div className="flex justify-between">
+                              <span>Nosso Número:</span>
+                              <span className="font-bold text-black">{bradescoBoletoResult.nossoNumero}</span>
+                            </div>
+                            <div className="space-y-0.5">
+                              <span>Linha Digitável:</span>
+                              <span className="block font-bold text-black text-[9px] break-all">{bradescoBoletoResult.linhaDigitavel}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const b = bradescoBoletoResult;
+                                const url = `/api/integration/bradesco/visualizar-boleto?` + 
+                                  `valor=${b.valor}` +
+                                  `&vencimento=${b.vencimento}` +
+                                  `&emissao=${b.emissao}` +
+                                  `&nome=${encodeURIComponent(b.pagador.nome)}` +
+                                  `&documento=${encodeURIComponent(b.pagador.documento)}` +
+                                  `&endereco=${encodeURIComponent(b.pagador.endereco)}` +
+                                  `&cep=${encodeURIComponent(b.pagador.cep)}` +
+                                  `&nosso_numero=${b.nossoNumero}` +
+                                  `&agencia=${b.agencia}` +
+                                  `&conta=${encodeURIComponent(b.conta)}` +
+                                  `&carteira=${b.carteira}` +
+                                  `&beneficiario=${encodeURIComponent(b.beneficiario)}` +
+                                  `&cnpj_beneficiario=${encodeURIComponent(b.cnpjBeneficiario)}`;
+                                window.open(url, '_blank');
+                              }}
+                              className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              Visualizar e Imprimir Boleto
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBradescoBoletoResult(null);
+                                setBradescoError(null);
+                              }}
+                              className="px-2.5 py-2 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg text-gray-700 text-xs font-semibold"
+                              title="Gerar Novamente"
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

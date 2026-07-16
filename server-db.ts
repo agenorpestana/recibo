@@ -45,7 +45,17 @@ const defaultIntegrationSettings: IntegrationSettings = {
   whaticket_default_message: 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}',
   auto_send_enabled: false,
   auto_send_day: 10,
-  auto_send_company_id: ''
+  auto_send_company_id: '',
+  bradesco_env: 'sandbox',
+  bradesco_client_id: '',
+  bradesco_client_secret: '',
+  bradesco_cert: '',
+  bradesco_key: '',
+  bradesco_agency: '',
+  bradesco_account: '',
+  bradesco_account_digit: '',
+  bradesco_wallet: '09',
+  bradesco_cnpj: ''
 };
 
 const defaultUsers: User[] = [
@@ -217,6 +227,26 @@ class Database {
           await pool.query('ALTER TABLE integration_settings ADD COLUMN auto_send_company_id VARCHAR(50) DEFAULT NULL');
           console.log('[Database Migration] Coluna "auto_send_company_id" adicionada/validada em "integration_settings".');
         } catch (err) {}
+
+        const bradescoCols = [
+          { name: 'bradesco_env', type: "VARCHAR(20) NOT NULL DEFAULT 'sandbox'" },
+          { name: 'bradesco_client_id', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'bradesco_client_secret', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'bradesco_cert', type: 'TEXT DEFAULT NULL' },
+          { name: 'bradesco_key', type: 'TEXT DEFAULT NULL' },
+          { name: 'bradesco_agency', type: 'VARCHAR(10) DEFAULT NULL' },
+          { name: 'bradesco_account', type: 'VARCHAR(20) DEFAULT NULL' },
+          { name: 'bradesco_account_digit', type: 'VARCHAR(5) DEFAULT NULL' },
+          { name: 'bradesco_wallet', type: 'VARCHAR(10) DEFAULT NULL' },
+          { name: 'bradesco_cnpj', type: 'VARCHAR(25) DEFAULT NULL' }
+        ];
+
+        for (const col of bradescoCols) {
+          try {
+            await pool.query(`ALTER TABLE integration_settings ADD COLUMN ${col.name} ${col.type}`);
+            console.log(`[Database Migration] Coluna "${col.name}" adicionada em "integration_settings".`);
+          } catch (err) {}
+        }
       } catch (err) {
         console.error('[Database Migration] Erro ao criar ou inicializar "integration_settings":', err);
       }
@@ -385,7 +415,17 @@ class Database {
         whaticket_default_message: rows[0].whaticket_default_message || '',
         auto_send_enabled: rows[0].auto_send_enabled === 1 || !!rows[0].auto_send_enabled,
         auto_send_day: rows[0].auto_send_day !== null && rows[0].auto_send_day !== undefined ? Number(rows[0].auto_send_day) : 10,
-        auto_send_company_id: rows[0].auto_send_company_id || ''
+        auto_send_company_id: rows[0].auto_send_company_id || '',
+        bradesco_env: rows[0].bradesco_env || 'sandbox',
+        bradesco_client_id: rows[0].bradesco_client_id || '',
+        bradesco_client_secret: rows[0].bradesco_client_secret || '',
+        bradesco_cert: rows[0].bradesco_cert || '',
+        bradesco_key: rows[0].bradesco_key || '',
+        bradesco_agency: rows[0].bradesco_agency || '',
+        bradesco_account: rows[0].bradesco_account || '',
+        bradesco_account_digit: rows[0].bradesco_account_digit || '',
+        bradesco_wallet: rows[0].bradesco_wallet || '09',
+        bradesco_cnpj: rows[0].bradesco_cnpj || ''
       };
     } catch (error) {
       console.error('Erro ao obter integration_settings no MySQL:', error);
@@ -403,20 +443,7 @@ class Database {
       const [rows]: any = await pool.query('SELECT id FROM integration_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [
-            settings.bom_controle_api_key || '',
-            settings.whaticket_api_token || '',
-            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
-            settings.whaticket_default_message || '',
-            settings.auto_send_enabled ? 1 : 0,
-            settings.auto_send_day || 10,
-            settings.auto_send_company_id || ''
-          ]
-        );
-      } else {
-        await pool.query(
-          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=? WHERE id=?',
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id, bradesco_env, bradesco_client_id, bradesco_client_secret, bradesco_cert, bradesco_key, bradesco_agency, bradesco_account, bradesco_account_digit, bradesco_wallet, bradesco_cnpj) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             settings.bom_controle_api_key || '',
             settings.whaticket_api_token || '',
@@ -425,6 +452,39 @@ class Database {
             settings.auto_send_enabled ? 1 : 0,
             settings.auto_send_day || 10,
             settings.auto_send_company_id || '',
+            settings.bradesco_env || 'sandbox',
+            settings.bradesco_client_id || '',
+            settings.bradesco_client_secret || '',
+            settings.bradesco_cert || '',
+            settings.bradesco_key || '',
+            settings.bradesco_agency || '',
+            settings.bradesco_account || '',
+            settings.bradesco_account_digit || '',
+            settings.bradesco_wallet || '09',
+            settings.bradesco_cnpj || ''
+          ]
+        );
+      } else {
+        await pool.query(
+          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=?, bradesco_env=?, bradesco_client_id=?, bradesco_client_secret=?, bradesco_cert=?, bradesco_key=?, bradesco_agency=?, bradesco_account=?, bradesco_account_digit=?, bradesco_wallet=?, bradesco_cnpj=? WHERE id=?',
+          [
+            settings.bom_controle_api_key || '',
+            settings.whaticket_api_token || '',
+            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+            settings.whaticket_default_message || '',
+            settings.auto_send_enabled ? 1 : 0,
+            settings.auto_send_day || 10,
+            settings.auto_send_company_id || '',
+            settings.bradesco_env || 'sandbox',
+            settings.bradesco_client_id || '',
+            settings.bradesco_client_secret || '',
+            settings.bradesco_cert || '',
+            settings.bradesco_key || '',
+            settings.bradesco_agency || '',
+            settings.bradesco_account || '',
+            settings.bradesco_account_digit || '',
+            settings.bradesco_wallet || '09',
+            settings.bradesco_cnpj || '',
             rows[0].id
           ]
         );

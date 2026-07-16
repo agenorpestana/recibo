@@ -107,6 +107,18 @@ export interface IntegrationSettings {
   auto_send_enabled?: boolean;
   auto_send_day?: number;
   auto_send_company_id?: string;
+
+  // Bradesco
+  bradesco_env?: 'sandbox' | 'production';
+  bradesco_client_id?: string;
+  bradesco_client_secret?: string;
+  bradesco_cert?: string;
+  bradesco_key?: string;
+  bradesco_agency?: string;
+  bradesco_account?: string;
+  bradesco_account_digit?: string;
+  bradesco_wallet?: string;
+  bradesco_cnpj?: string;
 }
 
 

@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import https from 'https';
+import querystring from 'querystring';
 import db from './server-db';
 
 async function startServer() {
@@ -696,6 +698,706 @@ async function startServer() {
       res.json({ success: true, result });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao enviar mensagem via Whaticket.' });
+    }
+  });
+
+  // --- INTEGRAÇÃO BOLETO BRADESCO API (mTLS) ---
+
+  // Helper para obter Fator de Vencimento
+  function getFatorVencimento(dateStr: string): number {
+    try {
+      const baseDate = new Date('1997-10-07T00:00:00Z');
+      const targetDate = new Date(dateStr + 'T00:00:00Z');
+      const diffTime = targetDate.getTime() - baseDate.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays > 0 ? diffDays : 0;
+    } catch (e) {
+      return 1000;
+    }
+  }
+
+  // Helper para cálculo de linha digitável e código de barras Bradesco (Banco 237)
+  function getBradescoLinha(
+    valor: number,
+    vencimento: string,
+    nossoNumero: string,
+    agencia: string,
+    conta: string,
+    carteira: string
+  ): { linhaDigitavel: string; barcode: string } {
+    const fator = getFatorVencimento(vencimento);
+    const centsStr = Math.round(valor * 100).toString().padStart(10, '0');
+
+    const ag = agencia.replace(/\D/g, '').padStart(4, '0');
+    const cart = carteira.replace(/\D/g, '').padStart(2, '0');
+    const nn = nossoNumero.replace(/\D/g, '').padStart(11, '0');
+    const cc = conta.replace(/\D/g, '').padStart(7, '0');
+
+    const campoLivre = ag + cart + nn + cc + '0';
+
+    const part1 = "2379";
+    const part2 = fator.toString().padStart(4, '0') + centsStr + campoLivre;
+
+    const fullTemp = part1 + "0" + part2;
+    let sum = 0;
+    let weight = 2;
+    for (let i = 43; i >= 0; i--) {
+      if (i === 4) continue;
+      const charVal = parseInt(fullTemp.charAt(i), 10);
+      sum += charVal * weight;
+      weight++;
+      if (weight > 9) weight = 2;
+    }
+    let dv = 11 - (sum % 11);
+    if (dv === 0 || dv === 10 || dv === 11) dv = 1;
+
+    const barcode = part1 + dv.toString() + part2;
+
+    const calcDac = (str: string): number => {
+      let s = 0;
+      let w = 2;
+      for (let i = str.length - 1; i >= 0; i--) {
+        let prod = parseInt(str.charAt(i), 10) * w;
+        if (prod > 9) prod = Math.floor(prod / 10) + (prod % 10);
+        s += prod;
+        w = w === 2 ? 1 : 2;
+      }
+      const rem = s % 10;
+      return rem === 0 ? 0 : 10 - rem;
+    };
+
+    const c1 = "2379" + campoLivre.substring(0, 5);
+    const dac1 = calcDac(c1);
+    const field1 = `2379${campoLivre.substring(0, 5)}${dac1}`;
+
+    const c2 = campoLivre.substring(5, 15);
+    const dac2 = calcDac(c2);
+    const field2 = `${campoLivre.substring(5, 15)}${dac2}`;
+
+    const c3 = campoLivre.substring(15, 25);
+    const dac3 = calcDac(c3);
+    const field3 = `${campoLivre.substring(15, 25)}${dac3}`;
+
+    const field4 = dv.toString();
+    const field5 = fator.toString().padStart(4, '0') + centsStr;
+
+    const f1 = `${field1.substring(0, 5)}.${field1.substring(5, 10)}`;
+    const f2 = `${field2.substring(0, 5)}.${field2.substring(5, 11)}`;
+    const f3 = `${field3.substring(0, 5)}.${field3.substring(5, 11)}`;
+
+    const linhaDigitavel = `${f1} ${f2} ${f3} ${field4} ${field5}`;
+
+    return { linhaDigitavel, barcode };
+  }
+
+  // Helper para gerar código de barras Interleaved 2 of 5 em SVG
+  function generateI25BarcodeSVG(digits: string): string {
+    const patterns: { [key: string]: string } = {
+      '0': 'NNWWN', '1': 'WNNNW', '2': 'NWNNW', '3': 'WWNNN', '4': 'NNWNW',
+      '5': 'WNWNN', '6': 'NWWNN', '7': 'NNNWW', '8': 'WNNWN', '9': 'NWNWN'
+    };
+
+    let barcodeStr = '1010';
+
+    for (let i = 0; i < digits.length; i += 2) {
+      const digit1 = digits.charAt(i);
+      const digit2 = digits.charAt(i + 1);
+
+      const p1 = patterns[digit1] || 'NNWWN';
+      const p2 = patterns[digit2] || 'NNWWN';
+
+      for (let j = 0; j < 5; j++) {
+        const bType = p1.charAt(j);
+        const sType = p2.charAt(j);
+
+        const bWidth = bType === 'W' ? '111' : '1';
+        const sWidth = sType === 'W' ? '000' : '0';
+
+        barcodeStr += bWidth + sWidth;
+      }
+    }
+
+    barcodeStr += '11101';
+
+    let svgPaths = '';
+    let x = 0;
+    const barHeight = 65;
+    const unitWidth = 1.05;
+
+    for (let i = 0; i < barcodeStr.length; i++) {
+      const bit = barcodeStr.charAt(i);
+      if (bit === '1') {
+        svgPaths += `<rect x="${x}" y="0" width="${unitWidth}" height="${barHeight}" fill="black" />`;
+      }
+      x += unitWidth;
+    }
+
+    const totalWidth = x;
+    return `<svg width="100%" height="${barHeight}" viewBox="0 0 ${totalWidth} ${barHeight}" preserveAspectRatio="none">${svgPaths}</svg>`;
+  }
+
+  // POST: Gerar ou simular registro de boleto Bradesco
+  app.post('/api/integration/bradesco/gerar-boleto', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const companySettings = await db.getSettings();
+
+      const { fatura, envSelection } = req.body;
+      if (!fatura) {
+        return res.status(400).json({ error: 'Os dados da fatura são obrigatórios.' });
+      }
+
+      // Se o usuário selecionou explicitamente na UI sandbox/produção, usamos, senão o configurado
+      const env = envSelection || settings.bradesco_env || 'sandbox';
+      const isProduction = env === 'production';
+
+      const clientId = settings.bradesco_client_id;
+      const clientSecret = settings.bradesco_client_secret;
+      const certContent = settings.bradesco_cert;
+      const keyContent = settings.bradesco_key;
+
+      const agency = settings.bradesco_agency || '0123';
+      const account = settings.bradesco_account || '0123456';
+      const accountDigit = settings.bradesco_account_digit || '7';
+      const wallet = settings.bradesco_wallet || '09';
+      const cnpjBeneficiario = settings.bradesco_cnpj || companySettings.cnpj || '44.285.891/0001-45';
+
+      // Dados da Fatura
+      const faturaId = fatura.Id || fatura.id || Math.floor(Math.random() * 100000);
+      const valor = Number(fatura.ValorOriginal || fatura.Valor || fatura.valor || 100.00);
+      const vencimento = fatura.DataVencimento || fatura.Vencimento || fatura.vencimento || new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const emissao = fatura.DataEmissao || fatura.Emissao || fatura.emissao || new Date().toISOString().split('T')[0];
+
+      // Pagador
+      const pagadorObj = fatura.Cliente || fatura.cliente || {};
+      const pagadorNome = pagadorObj.NomeRazaoSocial || pagadorObj.Nome || pagadorObj.nome || 'Cliente Desconhecido';
+      const pagadorDoc = pagadorObj.CnpjCpf || pagadorObj.cnpj_cpf || '000.000.000-00';
+      const pagadorCep = pagadorObj.Cep || pagadorObj.cep || '00000-000';
+      const pagadorEnd = pagadorObj.Endereco || pagadorObj.address || 'Rua não informada';
+
+      // Gerar Nosso Número único baseado na Fatura
+      const nossoNumero = `09${String(faturaId).padStart(9, '0')}`;
+
+      // Gerar linha digitável e código de barras real/calculado
+      const { linhaDigitavel, barcode } = getBradescoLinha(valor, vencimento, nossoNumero, agency, account, wallet);
+
+      // Se possui mTLS configurado, podemos tentar a chamada real de mTLS
+      let realApiSucceeded = false;
+      let apiLog = '';
+
+      if (clientId && clientSecret && certContent && keyContent) {
+        try {
+          console.log(`[Bradesco API mTLS] Iniciando autenticação em ambiente: ${env.toUpperCase()}`);
+          
+          const tokenHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+          const tokenPath = '/auth/server-mtls/v2/token';
+
+          const authBody = querystring.stringify({
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret
+          });
+
+          // Requisição mTLS para obter Token
+          const tokenRes: any = await new Promise((resolve, reject) => {
+            const reqOpts = {
+              hostname: tokenHost,
+              port: 443,
+              path: tokenPath,
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(authBody)
+              },
+              cert: certContent,
+              key: keyContent,
+              rejectUnauthorized: false // Permite conexões locais/sandbox sem validar a cadeia raiz estrita
+            };
+
+            const req = https.request(reqOpts, (res) => {
+              let data = '';
+              res.on('data', (chunk) => { data += chunk; });
+              res.on('end', () => {
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                  try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+                } else {
+                  reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
+                }
+              });
+            });
+
+            req.on('error', (e) => reject(e));
+            req.write(authBody);
+            req.end();
+          });
+
+          const accessToken = tokenRes.access_token;
+          if (accessToken) {
+            console.log('[Bradesco API mTLS] Bearer Token obtido com sucesso!');
+            
+            // Payload de Registro do Boleto Bradesco Oficial
+            const registerPayload = {
+              nuCnpjBeneficiario: cnpjBeneficiario.replace(/\D/g, ''),
+              nuAgenciaBeneficiario: Number(agency.replace(/\D/g, '')),
+              nuContaBeneficiario: Number(account.replace(/\D/g, '')),
+              nuDigitoContaBeneficiario: accountDigit,
+              idCarteira: Number(wallet.replace(/\D/g, '')),
+              nuBoleto: nossoNumero,
+              dtEmissao: emissao.split('-').reverse().join('.'), // DD.MM.YYYY
+              dtVencimento: vencimento.split('-').reverse().join('.'),
+              vlNominal: Math.round(valor * 100), // Em centavos
+              pagador: {
+                noPagador: pagadorNome.substring(0, 40),
+                nuCpfCnpjPagador: pagadorDoc.replace(/\D/g, ''),
+                nuCep: pagadorCep.replace(/\D/g, ''),
+                noLogradouro: pagadorEnd.substring(0, 40),
+                nuLogradouro: "S/N",
+                noBairro: "Centro",
+                noCidade: pagadorObj.Cidade || "Itamaraju",
+                noUf: pagadorObj.Estado || pagadorObj.Uf || "BA"
+              }
+            };
+
+            const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+            const registerPath = '/v1/boleto/registrar';
+
+            // Chamada de registro mTLS
+            const regRes: any = await new Promise((resolve, reject) => {
+              const reqOpts = {
+                hostname: registerHost,
+                port: 443,
+                path: registerPath,
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${accessToken}`
+                },
+                cert: certContent,
+                key: keyContent,
+                rejectUnauthorized: false
+              };
+
+              const req = https.request(reqOpts, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                  if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                    try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+                  } else {
+                    reject(new Error(`Erro HTTP ${res.statusCode}: ${data}`));
+                  }
+                });
+              });
+
+              req.on('error', (e) => reject(e));
+              req.write(JSON.stringify(registerPayload));
+              req.end();
+            });
+
+            console.log('[Bradesco API mTLS] Boleto registrado via API oficial com sucesso!');
+            realApiSucceeded = true;
+            apiLog = 'Registrado via API Bradesco Oficial com mTLS.';
+          }
+        } catch (apiError: any) {
+          console.warn('[Bradesco API mTLS] Falha no fluxo mTLS real, usando fallback de alta fidelidade:', apiError.message);
+          apiLog = `Chamada mTLS tentada, mas falhou: ${apiError.message}. Iniciado Fallback Seguro.`;
+        }
+      } else {
+        apiLog = 'Ambiente de testes/Sandbox ou credenciais de mTLS incompletas. Simulador ativo.';
+      }
+
+      // Retorna os dados do boleto gerado
+      res.json({
+        success: true,
+        mocked: !realApiSucceeded,
+        apiLog,
+        env: env,
+        boleto: {
+          nossoNumero,
+          linhaDigitavel,
+          barcodeValue: barcode,
+          valor,
+          vencimento,
+          emissao,
+          agencia: agency,
+          conta: `${account}-${accountDigit}`,
+          carteira: wallet,
+          cnpjBeneficiario,
+          beneficiario: companySettings.company_name || 'UNITY AUTOMACOES LTDA.',
+          pagador: {
+            nome: pagadorNome,
+            documento: pagadorDoc,
+            endereco: pagadorEnd,
+            cep: pagadorCep
+          }
+        }
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao processar boleto Bradesco.' });
+    }
+  });
+
+  // GET: Visualizar e Imprimir Boleto Bradesco (Otimizado para Impressão A4)
+  app.get('/api/integration/bradesco/visualizar-boleto', async (req, res) => {
+    try {
+      const {
+        valor,
+        vencimento,
+        emissao,
+        nome,
+        documento,
+        endereco,
+        cep,
+        nosso_numero,
+        agencia,
+        conta,
+        carteira,
+        beneficiario,
+        cnpj_beneficiario
+      } = req.query;
+
+      const vVal = Number(valor || 100.00);
+      const vVenc = String(vencimento || new Date().toISOString().split('T')[0]);
+      const vEmis = String(emissao || new Date().toISOString().split('T')[0]);
+      const vNome = String(nome || 'Cliente de Teste');
+      const vDoc = String(documento || '00.000.000/0001-00');
+      const vEnd = String(endereco || 'Rua de Teste, 123');
+      const vCep = String(cep || '00000-000');
+      const vNN = String(nosso_numero || '09000000001');
+      const vAg = String(agencia || '1234');
+      const vCc = String(conta || '56789-0');
+      const vCart = String(carteira || '09');
+      const vBenef = String(beneficiario || 'UNITY AUTOMACOES LTDA.');
+      const vCnpjB = String(cnpj_beneficiario || '44.285.891/0001-45');
+
+      // Calcular linha digitável e código de barras baseado nos parâmetros fornecidos
+      const { linhaDigitavel, barcode } = getBradescoLinha(vVal, vVenc, vNN, vAg, vCc, vCart);
+      const barcodeSVG = generateI25BarcodeSVG(barcode);
+
+      // Formatar valores para português
+      const formatCurrency = (val: number) => {
+        return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      };
+
+      const formatDateBr = (dateStr: string) => {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+        return dateStr;
+      };
+
+      const valorBr = formatCurrency(vVal);
+      const vencBr = formatDateBr(vVenc);
+      const emisBr = formatDateBr(vEmis);
+
+      // Renderiza template HTML de Alta Fidelidade do Boleto Bradesco
+      const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Boleto Bradesco - ${vNN}</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+          body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 20px 0;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .boleto-container {
+            background-color: white;
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 15mm;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            box-sizing: border-box;
+          }
+          .boleto-table td {
+            border: 1px solid #000;
+            padding: 3px 6px;
+            font-size: 10px;
+            vertical-align: top;
+          }
+          .label {
+            font-size: 8px;
+            color: #4b5563;
+            text-transform: uppercase;
+            font-weight: 500;
+            display: block;
+            margin-bottom: 1px;
+          }
+          .value {
+            font-size: 10px;
+            font-weight: 600;
+            color: #000;
+          }
+          .cut-line {
+            border-top: 1px dashed #000;
+            margin: 25px 0;
+            position: relative;
+          }
+          .cut-line::after {
+            content: "✂ Cortar Aqui";
+            position: absolute;
+            right: 10px;
+            top: -10px;
+            background: white;
+            padding: 0 5px;
+            font-size: 10px;
+            color: #4b5563;
+          }
+          @media print {
+            body {
+              background-color: white;
+              padding: 0;
+              margin: 0;
+            }
+            .boleto-container {
+              box-shadow: none;
+              padding: 5mm;
+              width: 210mm;
+              height: 297mm;
+              margin: 0;
+              page-break-after: always;
+            }
+            .no-print {
+              display: none !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+
+        <!-- Painel Superior de Ações (Não Imprimível) -->
+        <div class="no-print max-w-[210mm] mx-auto mb-4 bg-white p-4 rounded-lg shadow flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold">
+              237
+            </div>
+            <div>
+              <h1 class="text-sm font-bold text-gray-900">Boleto Bradesco Pronto para Emissão</h1>
+              <p class="text-xs text-gray-500">Imprima ou exporte como PDF em formato A4.</p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="window.print()" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium text-xs rounded shadow flex items-center space-x-1 cursor-pointer transition">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-3a2 2 0 00-2-2H9a2 2 0 00-2 2v3a2 2 0 002 2zm0-5h4M9 4h6m-6 4h6"></path></svg>
+              <span>Imprimir / Gerar PDF</span>
+            </button>
+            <button onclick="window.close()" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-xs rounded border border-gray-200 cursor-pointer transition">
+              Fechar Janela
+            </button>
+          </div>
+        </div>
+
+        <div class="boleto-container">
+          
+          <!-- VIA DO CLIENTE (RECIBO DO PAGADOR) -->
+          <div class="flex items-end justify-between border-b-2 border-black pb-1 mb-3">
+            <div class="flex items-center space-x-3">
+              <span class="text-xl font-extrabold text-red-600 tracking-tighter">Bradesco</span>
+              <span class="text-lg font-bold border-x border-black px-3 py-0.5">237-2</span>
+            </div>
+            <div class="text-xs font-bold text-right">RECIBO DO PAGADOR</div>
+          </div>
+
+          <table class="w-full boleto-table table-fixed mb-4">
+            <tbody>
+              <tr>
+                <td colspan="4" class="w-3/4">
+                  <span class="label">Beneficiário</span>
+                  <span class="value">${vBenef} - CNPJ: ${vCnpjB}</span>
+                </td>
+                <td class="w-1/4">
+                  <span class="label">Agência / Código Beneficiário</span>
+                  <span class="value">${vAg} / ${vCc}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="2">
+                  <span class="label">Pagador</span>
+                  <span class="value">${vNome}</span>
+                </td>
+                <td>
+                  <span class="label">Data Vencimento</span>
+                  <span class="value">${vVenc}</span>
+                </td>
+                <td>
+                  <span class="label">Nosso Número</span>
+                  <span class="value">${vNN}</span>
+                </td>
+                <td>
+                  <span class="label">Valor do Documento</span>
+                  <span class="value">${valorBr}</span>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="label">Espécie Doc.</span>
+                  <span class="value">DS</span>
+                </td>
+                <td>
+                  <span class="label">Aceite</span>
+                  <span class="value">N</span>
+                </td>
+                <td>
+                  <span class="label">Data Emissão</span>
+                  <span class="value">${emisBr}</span>
+                </td>
+                <td>
+                  <span class="label">Carteira / Espécie</span>
+                  <span class="value">${vCart} / R$</span>
+                </td>
+                <td>
+                  <span class="label">Valor Cobrado</span>
+                  <span class="value">${valorBr}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="5" class="h-12">
+                  <span class="label">Instruções (Todas as instruções de cobrança são de inteira responsabilidade do beneficiário)</span>
+                  <span class="value block mb-1 text-gray-700 font-normal">
+                    • NÃO RECEBER APÓS O VENCIMENTO.
+                  </span>
+                  <span class="value block text-gray-700 font-normal">
+                    • BOLETO REFERENTE ÀS FATURAS DA INTEGRAÇÃO DO BOM CONTROLE.
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="cut-line"></div>
+
+          <!-- VIA DO BANCO (FICHA DE COMPENSAÇÃO) -->
+          <div class="flex items-end justify-between border-b-2 border-black pb-1 mb-2">
+            <div class="flex items-center space-x-3">
+              <span class="text-xl font-extrabold text-red-600 tracking-tighter">Bradesco</span>
+              <span class="text-lg font-bold border-x border-black px-3 py-0.5">237-2</span>
+              <span class="text-xs font-bold tracking-tight">${linhaDigitavel}</span>
+            </div>
+          </div>
+
+          <table class="w-full boleto-table table-fixed mb-4">
+            <tbody>
+              <tr>
+                <td colspan="4" class="w-3/4">
+                  <span class="label">Local de Pagamento</span>
+                  <span class="value">QUALQUER BANCO ATÉ O VENCIMENTO</span>
+                </td>
+                <td class="w-1/4 bg-gray-50">
+                  <span class="label">Vencimento</span>
+                  <span class="value text-base text-right block">${vencBr}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="4">
+                  <span class="label">Beneficiário</span>
+                  <span class="value">${vBenef} - CNPJ: ${vCnpjB}</span>
+                </td>
+                <td class="bg-gray-50">
+                  <span class="label">Agência / Código Beneficiário</span>
+                  <span class="value block text-right">${vAg} / ${vCc}</span>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="label">Data do Doc.</span>
+                  <span class="value">${emisBr}</span>
+                </td>
+                <td colspan="2">
+                  <span class="label">Nº do Documento</span>
+                  <span class="value">BC-${vNN.substring(2)}</span>
+                </td>
+                <td>
+                  <span class="label">Espécie Doc.</span>
+                  <span class="value">DS</span>
+                </td>
+                <td class="bg-gray-50">
+                  <span class="label">Nosso Número / Cód. Barras</span>
+                  <span class="value block text-right">${vNN}</span>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="label">Uso do Banco</span>
+                  <span class="value"></span>
+                </td>
+                <td>
+                  <span class="label">Carteira</span>
+                  <span class="value">${vCart}</span>
+                </td>
+                <td>
+                  <span class="label">Espécie</span>
+                  <span class="value">R$</span>
+                </td>
+                <td>
+                  <span class="label">Quantidade</span>
+                  <span class="value"></span>
+                </td>
+                <td class="bg-gray-50">
+                  <span class="label">(=) Valor do Documento</span>
+                  <span class="value block text-right text-base">${valorBr}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="4" rowspan="2" class="h-32">
+                  <span class="label">Instruções (Todas as instruções de cobrança são de inteira responsabilidade do beneficiário)</span>
+                  <div class="text-xs font-semibold space-y-1 mt-1 text-black">
+                    <p>• NÃO RECEBER APÓS O VENCIMENTO.</p>
+                    <p>• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO.</p>
+                    <p>• PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA OU PELO SEU INTERNET BANKING.</p>
+                  </div>
+                </td>
+                <td>
+                  <span class="label">(-) Desconto / Abatimento</span>
+                  <span class="value block text-right"></span>
+                </td>
+              </tr>
+              <tr>
+                <td class="bg-gray-50">
+                  <span class="label">(=) Valor Cobrado</span>
+                  <span class="value block text-right text-base font-bold">${valorBr}</span>
+                </td>
+              </tr>
+              <tr>
+                <td colspan="5">
+                  <span class="label">Pagador</span>
+                  <span class="value block font-bold">${vNome}</span>
+                  <span class="value block font-normal text-gray-700">${vEnd} - CEP: ${vCep}</span>
+                  <span class="value block font-normal text-gray-700">CPF/CNPJ: ${vDoc}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Barcode Area -->
+          <div class="mt-8 flex flex-col items-start justify-center pl-4">
+            <div class="w-[125mm] bg-white">
+              ${barcodeSVG}
+            </div>
+            <div class="text-[9px] font-mono mt-1 text-gray-500 tracking-widest">
+              ${barcode}
+            </div>
+          </div>
+
+        </div>
+
+      </body>
+      </html>
+      `;
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    } catch (e: any) {
+      res.status(500).send(`Erro ao visualizar boleto Bradesco: ${e.message}`);
     }
   });
 
