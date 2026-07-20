@@ -703,14 +703,18 @@ async function startServer() {
 
   // --- INTEGRAÇÃO BOLETO BRADESCO API (mTLS) ---
 
-  // Helper para obter Fator de Vencimento
+  // Helper para obter Fator de Vencimento (com tratamento de estouro de 10000 pela regra FEBRABAN)
   function getFatorVencimento(dateStr: string): number {
     try {
       const baseDate = new Date('1997-10-07T00:00:00Z');
       const targetDate = new Date(dateStr + 'T00:00:00Z');
       const diffTime = targetDate.getTime() - baseDate.getTime();
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays > 0 ? diffDays : 0;
+      let fator = diffDays > 0 ? diffDays : 0;
+      if (fator >= 10000) {
+        fator = ((fator - 1000) % 9000) + 1000;
+      }
+      return fator;
     } catch (e) {
       return 1000;
     }
@@ -1202,7 +1206,9 @@ async function startServer() {
         carteira,
         beneficiario,
         cnpj_beneficiario,
-        qr_code
+        qr_code,
+        linha_digitavel,
+        barcode: queryBarcode
       } = req.query;
 
       const vVal = Number(valor || 100.00);
@@ -1221,8 +1227,38 @@ async function startServer() {
       const vBenef = String(beneficiario || 'UNITY AUTOMACOES LTDA.');
       const vCnpjB = String(cnpj_beneficiario || '44.285.891/0001-45');
 
-      // Calcular linha digitável e código de barras baseado nos parâmetros fornecidos
-      const { linhaDigitavel, barcode } = getBradescoLinha(vVal, vVenc, vNN, vAg, vCc, vCart);
+      // Helper para formatar a linha digitável com os pontos e espaços padrões se vier limpa do banco
+      const formatLinhaDigitavel = (raw: string): string => {
+        const clean = raw.replace(/\D/g, '');
+        if (clean.length === 47) {
+          const f1 = `${clean.substring(0, 5)}.${clean.substring(5, 10)}`;
+          const f2 = `${clean.substring(10, 15)}.${clean.substring(15, 21)}`;
+          const f3 = `${clean.substring(21, 26)}.${clean.substring(26, 32)}`;
+          const f4 = clean.substring(32, 33);
+          const f5 = clean.substring(33, 47);
+          return `${f1} ${f2} ${f3} ${f4} ${f5}`;
+        }
+        return raw;
+      };
+
+      // Se a linha digitável e o código de barras foram passados (gerados pela API oficial do banco), usamos eles
+      let linhaDigitavel = '';
+      let barcode = '';
+
+      if (linha_digitavel) {
+        linhaDigitavel = formatLinhaDigitavel(String(linha_digitavel));
+      }
+      if (queryBarcode) {
+        barcode = String(queryBarcode).replace(/\D/g, ''); // Garante que apenas dígitos vão para o SVG do código de barras
+      }
+
+      if (!linhaDigitavel || !barcode) {
+        // Calcular linha digitável e código de barras baseado nos parâmetros fornecidos se não vieram na query
+        const calculated = getBradescoLinha(vVal, vVenc, vNN, vAg, vCc, vCart);
+        if (!linhaDigitavel) linhaDigitavel = calculated.linhaDigitavel;
+        if (!barcode) barcode = calculated.barcode;
+      }
+
       const barcodeSVG = generateI25BarcodeSVG(barcode);
 
       // Formatar valores para português

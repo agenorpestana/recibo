@@ -2217,7 +2217,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                   `&carteira=${b.carteira}` +
                                   `&beneficiario=${encodeURIComponent(b.beneficiario)}` +
                                   `&cnpj_beneficiario=${encodeURIComponent(b.cnpjBeneficiario)}` +
-                                  `&qr_code=${encodeURIComponent(b.qrCode || '')}`;
+                                  `&qr_code=${encodeURIComponent(b.qrCode || '')}` +
+                                  `&linha_digitavel=${encodeURIComponent(b.linhaDigitavel || '')}` +
+                                  `&barcode=${encodeURIComponent(b.barcodeValue || '')}`;
                                 window.open(url, '_blank');
                               }}
                               className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
