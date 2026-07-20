@@ -364,16 +364,73 @@ async function startServer() {
         });
         if (clientResponse.ok) {
           const clientData = await clientResponse.json();
-          const clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia;
-          const clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf;
-          const clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+          
+          let clientName = '';
+          let clientDoc = '';
+          let clientCel = '';
+          let clientCep = '';
+          let clientCidade = '';
+          let clientUf = '';
+          let clientEmail = '';
+
+          if (clientData.TipoPessoa === 'Juridica' && clientData.PessoaJuridica) {
+            clientName = clientData.PessoaJuridica.NomeFantasia || clientData.PessoaJuridica.RazaoSocial || '';
+            clientDoc = clientData.PessoaJuridica.Documento || '';
+          } else if (clientData.TipoPessoa === 'Fisica' && clientData.PessoaFisica) {
+            clientName = clientData.PessoaFisica.Nome || '';
+            clientDoc = clientData.PessoaFisica.Documento || '';
+          }
+
+          if (!clientName) {
+            clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia || '';
+          }
+          if (!clientDoc) {
+            clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf || '';
+          }
+
+          if (clientData.Endereco && typeof clientData.Endereco === 'object') {
+            clientCep = clientData.Endereco.Cep || clientData.Endereco.cep || '';
+            clientCidade = clientData.Endereco.Cidade || clientData.Endereco.cidade || '';
+            clientUf = clientData.Endereco.Uf || clientData.Endereco.uf || '';
+          }
+
+          if (!clientCep) {
+            clientCep = clientData.Cep || clientData.cep || '';
+          }
+          if (!clientCidade) {
+            clientCidade = clientData.Cidade || clientData.cidade || '';
+          }
+          if (!clientUf) {
+            clientUf = clientData.Estado || clientData.Uf || clientData.uf || '';
+          }
+
+          if (Array.isArray(clientData.Contatos) && clientData.Contatos.length > 0) {
+            const primary = clientData.Contatos.find((c: any) => c.Padrao) ||
+                            clientData.Contatos.find((c: any) => c.Cobranca) ||
+                            clientData.Contatos[0];
+            if (primary) {
+              clientCel = primary.Telefone || '';
+              clientEmail = primary.Email || '';
+            }
+          }
+
+          if (!clientCel) {
+            clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+          }
+          if (!clientEmail) {
+            clientEmail = clientData.Email || '';
+          }
           
           fatura.Cliente = {
             ...clientData,
             Id: idCliente,
             Nome: clientName || fatura.Cliente?.Nome || 'Cliente Não Informado',
             CnpjCpf: clientDoc || fatura.Cliente?.CnpjCpf || 'N/A',
-            Celular: clientCel || fatura.Cliente?.Celular || ''
+            Celular: clientCel || fatura.Cliente?.Celular || '',
+            Cep: clientCep || fatura.Cliente?.Cep || '',
+            Cidade: clientCidade || fatura.Cliente?.Cidade || '',
+            Uf: clientUf || fatura.Cliente?.Uf || '',
+            Email: clientEmail || fatura.Cliente?.Email || ''
           };
         }
       } catch (err) {

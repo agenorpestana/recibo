@@ -275,17 +275,74 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           const clientRes = await fetch(`/api/integration/bom-controle/cliente/${clientId}`);
           if (clientRes.ok) {
             const clientData = await clientRes.json();
-            const clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia;
-            const clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf;
-            const clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
             
+            let clientName = '';
+            let clientDoc = '';
+            let clientCel = '';
+            let clientCep = '';
+            let clientCidade = '';
+            let clientUf = '';
+            let clientEmail = '';
+
+            if (clientData.TipoPessoa === 'Juridica' && clientData.PessoaJuridica) {
+              clientName = clientData.PessoaJuridica.NomeFantasia || clientData.PessoaJuridica.RazaoSocial || '';
+              clientDoc = clientData.PessoaJuridica.Documento || '';
+            } else if (clientData.TipoPessoa === 'Fisica' && clientData.PessoaFisica) {
+              clientName = clientData.PessoaFisica.Nome || '';
+              clientDoc = clientData.PessoaFisica.Documento || '';
+            }
+
+            if (!clientName) {
+              clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia || '';
+            }
+            if (!clientDoc) {
+              clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf || '';
+            }
+
+            if (clientData.Endereco && typeof clientData.Endereco === 'object') {
+              clientCep = clientData.Endereco.Cep || clientData.Endereco.cep || '';
+              clientCidade = clientData.Endereco.Cidade || clientData.Endereco.cidade || '';
+              clientUf = clientData.Endereco.Uf || clientData.Endereco.uf || '';
+            }
+
+            if (!clientCep) {
+              clientCep = clientData.Cep || clientData.cep || '';
+            }
+            if (!clientCidade) {
+              clientCidade = clientData.Cidade || clientData.cidade || '';
+            }
+            if (!clientUf) {
+              clientUf = clientData.Estado || clientData.Uf || clientData.uf || '';
+            }
+
+            if (Array.isArray(clientData.Contatos) && clientData.Contatos.length > 0) {
+              const primary = clientData.Contatos.find((c: any) => c.Padrao) ||
+                              clientData.Contatos.find((c: any) => c.Cobranca) ||
+                              clientData.Contatos[0];
+              if (primary) {
+                clientCel = primary.Telefone || '';
+                clientEmail = primary.Email || '';
+              }
+            }
+
+            if (!clientCel) {
+              clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+            }
+            if (!clientEmail) {
+              clientEmail = clientData.Email || '';
+            }
+
             data.Cliente = {
               ...data.Cliente,
               ...clientData,
               Id: clientId,
               Nome: clientName || data.Cliente?.Nome || localItem?.Cliente?.Nome || 'Cliente Não Informado',
               CnpjCpf: clientDoc || data.Cliente?.CnpjCpf || localItem?.Cliente?.CnpjCpf || 'N/A',
-              Celular: clientCel || data.Cliente?.Celular || ''
+              Celular: clientCel || data.Cliente?.Celular || '',
+              Cep: clientCep || data.Cliente?.Cep || '',
+              Cidade: clientCidade || data.Cliente?.Cidade || '',
+              Uf: clientUf || data.Cliente?.Uf || '',
+              Email: clientEmail || data.Cliente?.Email || ''
             };
           }
         } catch (e) {
@@ -717,13 +774,74 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
             const clientRes = await fetch(`/api/integration/bom-controle/cliente/${clientId}`);
             if (clientRes.ok) {
               const clientData = await clientRes.json();
+              
+              let clientName = '';
+              let clientDoc = '';
+              let clientCel = '';
+              let clientCep = '';
+              let clientCidade = '';
+              let clientUf = '';
+              let clientEmail = '';
+
+              if (clientData.TipoPessoa === 'Juridica' && clientData.PessoaJuridica) {
+                clientName = clientData.PessoaJuridica.NomeFantasia || clientData.PessoaJuridica.RazaoSocial || '';
+                clientDoc = clientData.PessoaJuridica.Documento || '';
+              } else if (clientData.TipoPessoa === 'Fisica' && clientData.PessoaFisica) {
+                clientName = clientData.PessoaFisica.Nome || '';
+                clientDoc = clientData.PessoaFisica.Documento || '';
+              }
+
+              if (!clientName) {
+                clientName = clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || clientData.NomeFantasia || '';
+              }
+              if (!clientDoc) {
+                clientDoc = clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || clientData.Cpf || '';
+              }
+
+              if (clientData.Endereco && typeof clientData.Endereco === 'object') {
+                clientCep = clientData.Endereco.Cep || clientData.Endereco.cep || '';
+                clientCidade = clientData.Endereco.Cidade || clientData.Endereco.cidade || '';
+                clientUf = clientData.Endereco.Uf || clientData.Endereco.uf || '';
+              }
+
+              if (!clientCep) {
+                clientCep = clientData.Cep || clientData.cep || '';
+              }
+              if (!clientCidade) {
+                clientCidade = clientData.Cidade || clientData.cidade || '';
+              }
+              if (!clientUf) {
+                clientUf = clientData.Estado || clientData.Uf || clientData.uf || '';
+              }
+
+              if (Array.isArray(clientData.Contatos) && clientData.Contatos.length > 0) {
+                const primary = clientData.Contatos.find((c: any) => c.Padrao) ||
+                                clientData.Contatos.find((c: any) => c.Cobranca) ||
+                                clientData.Contatos[0];
+                if (primary) {
+                  clientCel = primary.Telefone || '';
+                  clientEmail = primary.Email || '';
+                }
+              }
+
+              if (!clientCel) {
+                clientCel = clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || '';
+              }
+              if (!clientEmail) {
+                clientEmail = clientData.Email || '';
+              }
+
               data.Cliente = {
                 ...data.Cliente,
                 ...clientData,
                 Id: clientId,
-                Nome: clientData.Nome || clientData.NomeRazaoSocial || clientData.RazaoSocial || data.Cliente?.Nome || 'Cliente Não Informado',
-                CnpjCpf: clientData.CnpjCpf || clientData.CpfCnpj || clientData.Cnpj || data.Cliente?.CnpjCpf || 'N/A',
-                Celular: clientData.Celular || clientData.Telefone || clientData.CelularWhatsApp || data.Cliente?.Celular || ''
+                Nome: clientName || data.Cliente?.Nome || 'Cliente Não Informado',
+                CnpjCpf: clientDoc || data.Cliente?.CnpjCpf || 'N/A',
+                Celular: clientCel || data.Cliente?.Celular || '',
+                Cep: clientCep || data.Cliente?.Cep || '',
+                Cidade: clientCidade || data.Cliente?.Cidade || '',
+                Uf: clientUf || data.Cliente?.Uf || '',
+                Email: clientEmail || data.Cliente?.Email || ''
               };
             }
           } catch (e) {
