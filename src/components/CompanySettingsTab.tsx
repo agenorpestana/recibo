@@ -551,7 +551,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           `&carteira=${boleto.carteira}` +
           `&beneficiario=${encodeURIComponent(boleto.beneficiario)}` +
           `&cnpj_beneficiario=${encodeURIComponent(boleto.cnpjBeneficiario)}` +
-          `&qr_code=${encodeURIComponent(boleto.qrCode || '')}`;
+          `&qr_code=${encodeURIComponent(boleto.qrCode || '')}` +
+          `&linha_digitavel=${encodeURIComponent(boleto.linhaDigitavel || '')}` +
+          `&barcode=${encodeURIComponent(boleto.barcodeValue || '')}`;
 
         let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bradesco no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
         const valorStr = `R$ ${Number(boleto.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -2319,8 +2321,24 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       <div className="max-h-[200px] overflow-y-auto divide-y divide-gray-100">
                         {bomSearchResults.map((item: any, idx: number) => {
                           const id = item.Id || item.id || idx;
-                          const name = item.Nome || item.RazaoSocial || item.NomeRazaoSocial || item.NomeFantasia || 'N/A';
-                          const doc = item.CnpjCpf || item.CpfCnpj || item.Cnpj || item.Cpf || 'N/A';
+                          let name = 'N/A';
+                          if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
+                            name = item.PessoaJuridica.NomeFantasia || item.PessoaJuridica.RazaoSocial || 'N/A';
+                          } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
+                            name = item.PessoaFisica.Nome || 'N/A';
+                          } else {
+                            name = item.Nome || item.RazaoSocial || item.NomeRazaoSocial || item.NomeFantasia || 'N/A';
+                          }
+
+                          let doc = 'N/A';
+                          if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
+                            doc = item.PessoaJuridica.Documento || 'N/A';
+                          } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
+                            doc = item.PessoaFisica.Documento || 'N/A';
+                          } else {
+                            doc = item.CnpjCpf || item.CpfCnpj || item.Cnpj || item.Cpf || 'N/A';
+                          }
+
                           return (
                             <div key={id} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-gray-50/50">
                               <div className="min-w-0 flex-1">
@@ -2350,59 +2368,121 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                 )}
 
                 {/* Detalhes expandidos do Cliente */}
-                {bomSelectedDetail && (
-                  <div className="bg-gradient-to-br from-indigo-50/10 to-gray-50/60 border border-indigo-150 rounded-xl p-4 space-y-3 animate-fade-in text-xs">
-                    <div className="border-b border-indigo-100 pb-2 flex justify-between items-center">
-                      <h4 className="font-bold text-indigo-900 text-sm flex items-center gap-1">
-                        <CheckCircle className="h-4 w-4 text-emerald-500" />
-                        Detalhes do Cadastro do Cliente
-                      </h4>
-                      <button 
-                        onClick={() => setBomSelectedDetail(null)}
-                        className="text-[10px] font-bold text-red-500 hover:underline"
-                      >
-                        Fechar
-                      </button>
-                    </div>
+                {bomSelectedDetail && (() => {
+                  const id = bomSelectedDetail.Id || bomSelectedDetail.id;
+                  
+                  let name = 'N/A';
+                  if (bomSelectedDetail.TipoPessoa === 'Juridica' && bomSelectedDetail.PessoaJuridica) {
+                    name = bomSelectedDetail.PessoaJuridica.NomeFantasia || bomSelectedDetail.PessoaJuridica.RazaoSocial || 'N/A';
+                  } else if (bomSelectedDetail.TipoPessoa === 'Fisica' && bomSelectedDetail.PessoaFisica) {
+                    name = bomSelectedDetail.PessoaFisica.Nome || 'N/A';
+                  } else {
+                    name = bomSelectedDetail.Nome || bomSelectedDetail.NomeRazaoSocial || 'N/A';
+                  }
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
-                      <div>
-                        <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Nome / Razão Social</span>
-                        <span className="font-bold text-gray-800">{bomSelectedDetail.Nome || bomSelectedDetail.NomeRazaoSocial || 'N/A'}</span>
+                  let doc = 'N/A';
+                  if (bomSelectedDetail.TipoPessoa === 'Juridica' && bomSelectedDetail.PessoaJuridica) {
+                    doc = bomSelectedDetail.PessoaJuridica.Documento || 'N/A';
+                  } else if (bomSelectedDetail.TipoPessoa === 'Fisica' && bomSelectedDetail.PessoaFisica) {
+                    doc = bomSelectedDetail.PessoaFisica.Documento || 'N/A';
+                  } else {
+                    doc = bomSelectedDetail.CnpjCpf || bomSelectedDetail.CpfCnpj || bomSelectedDetail.Cnpj || 'N/A';
+                  }
+
+                  let phone = 'N/A';
+                  if (bomSelectedDetail.Celular || bomSelectedDetail.Telefone || bomSelectedDetail.CelularWhatsApp) {
+                    phone = bomSelectedDetail.Celular || bomSelectedDetail.Telefone || bomSelectedDetail.CelularWhatsApp;
+                  } else if (Array.isArray(bomSelectedDetail.Contatos) && bomSelectedDetail.Contatos.length > 0) {
+                    const primary = bomSelectedDetail.Contatos.find((c: any) => c.Padrao) ||
+                                    bomSelectedDetail.Contatos.find((c: any) => c.Cobranca) ||
+                                    bomSelectedDetail.Contatos.find((c: any) => c.Telefone) ||
+                                    bomSelectedDetail.Contatos[0];
+                    if (primary) {
+                      phone = primary.Telefone || 'N/A';
+                    }
+                  }
+
+                  let email = bomSelectedDetail.Email || '';
+                  if (!email && Array.isArray(bomSelectedDetail.Contatos) && bomSelectedDetail.Contatos.length > 0) {
+                    const primary = bomSelectedDetail.Contatos.find((c: any) => c.Padrao) ||
+                                    bomSelectedDetail.Contatos.find((c: any) => c.Cobranca) ||
+                                    bomSelectedDetail.Contatos.find((c: any) => c.Email) ||
+                                    bomSelectedDetail.Contatos[0];
+                    if (primary) {
+                      email = primary.Email || '';
+                    }
+                  }
+
+                  let addressStr = '';
+                  if (bomSelectedDetail.Endereco && typeof bomSelectedDetail.Endereco === 'object') {
+                    const end = bomSelectedDetail.Endereco;
+                    const logradouro = `${end.TipoLogradouro || ''} ${end.Logradouro || ''}`.trim();
+                    addressStr = logradouro;
+                  } else {
+                    addressStr = bomSelectedDetail.Logradouro || bomSelectedDetail.Endereco || '';
+                  }
+
+                  const numero = bomSelectedDetail.Endereco?.Numero || bomSelectedDetail.Numero || '';
+                  const bairro = bomSelectedDetail.Endereco?.Bairro || bomSelectedDetail.Bairro || '';
+                  const cidade = bomSelectedDetail.Endereco?.Cidade || bomSelectedDetail.Cidade || '';
+                  const uf = bomSelectedDetail.Endereco?.Uf || bomSelectedDetail.Uf || '';
+                  const cep = bomSelectedDetail.Endereco?.Cep || bomSelectedDetail.Cep || '';
+
+                  return (
+                    <div className="bg-gradient-to-br from-indigo-50/10 to-gray-50/60 border border-indigo-150 rounded-xl p-4 space-y-3 animate-fade-in text-xs">
+                      <div className="border-b border-indigo-100 pb-2 flex justify-between items-center">
+                        <h4 className="font-bold text-indigo-900 text-sm flex items-center gap-1">
+                          <CheckCircle className="h-4 w-4 text-emerald-500" />
+                          Detalhes do Cadastro do Cliente
+                        </h4>
+                        <button 
+                          onClick={() => setBomSelectedDetail(null)}
+                          className="text-[10px] font-bold text-red-500 hover:underline"
+                        >
+                          Fechar
+                        </button>
                       </div>
-                      <div>
-                        <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">ID do Sistema</span>
-                        <span className="font-mono text-gray-800">#{bomSelectedDetail.Id || bomSelectedDetail.id}</span>
-                      </div>
-                      <div>
-                        <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">CPF/CNPJ</span>
-                        <span className="font-mono text-gray-800">{bomSelectedDetail.CnpjCpf || bomSelectedDetail.CpfCnpj || bomSelectedDetail.Cnpj || 'N/A'}</span>
-                      </div>
-                      <div>
-                        <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Celular / Telefone</span>
-                        <span className="font-mono text-gray-800 font-bold text-indigo-650">{bomSelectedDetail.Celular || bomSelectedDetail.Telefone || bomSelectedDetail.CelularWhatsApp || 'N/A'}</span>
-                      </div>
-                      {bomSelectedDetail.Email && (
-                        <div className="md:col-span-2">
-                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">E-mail</span>
-                          <span className="text-gray-800 font-sans">{bomSelectedDetail.Email}</span>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
+                        <div>
+                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Nome / Razão Social</span>
+                          <span className="font-bold text-gray-800">{name}</span>
                         </div>
-                      )}
-                      {(bomSelectedDetail.Logradouro || bomSelectedDetail.Endereco) && (
-                        <div className="md:col-span-2">
-                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Endereço Registrado</span>
-                          <span className="text-gray-700 font-sans">
-                            {bomSelectedDetail.Logradouro || bomSelectedDetail.Endereco}
-                            {bomSelectedDetail.Numero && `, ${bomSelectedDetail.Numero}`}
-                            {bomSelectedDetail.Bairro && ` - ${bomSelectedDetail.Bairro}`}
-                            {bomSelectedDetail.Cidade && ` - ${bomSelectedDetail.Cidade}`}
-                            {bomSelectedDetail.Uf && `/${bomSelectedDetail.Uf}`}
-                          </span>
+                        <div>
+                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">ID do Sistema</span>
+                          <span className="font-mono text-gray-800">#{id}</span>
                         </div>
-                      )}
+                        <div>
+                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">CPF/CNPJ</span>
+                          <span className="font-mono text-gray-800">{doc}</span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Celular / Telefone</span>
+                          <span className="font-mono text-gray-800 font-bold text-indigo-650">{phone}</span>
+                        </div>
+                        {email && (
+                          <div className="md:col-span-2">
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">E-mail</span>
+                            <span className="text-gray-800 font-sans">{email}</span>
+                          </div>
+                        )}
+                        {addressStr && (
+                          <div className="md:col-span-2">
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Endereço Registrado</span>
+                            <span className="text-gray-700 font-sans">
+                              {addressStr}
+                              {numero && `, ${numero}`}
+                              {bairro && ` - ${bairro}`}
+                              {cidade && ` - ${cidade}`}
+                              {uf && `/${uf}`}
+                              {cep && ` - CEP: ${cep}`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Box 3: Disparo via API Whaticket */}
