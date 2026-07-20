@@ -366,6 +366,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       if (!res.ok) throw new Error('Falha ao carregar configurações de integração.');
       const data = await res.json();
       setIntegrationSettings(data);
+      if (data.bradesco_env) {
+        setBradescoEnvSelection(data.bradesco_env);
+      }
     } catch (err: any) {
       setIntegrationError(err.message || 'Erro ao carregar configurações de integração.');
     } finally {
@@ -493,7 +496,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           `&conta=${encodeURIComponent(boleto.conta)}` +
           `&carteira=${boleto.carteira}` +
           `&beneficiario=${encodeURIComponent(boleto.beneficiario)}` +
-          `&cnpj_beneficiario=${encodeURIComponent(boleto.cnpjBeneficiario)}`;
+          `&cnpj_beneficiario=${encodeURIComponent(boleto.cnpjBeneficiario)}` +
+          `&qr_code=${encodeURIComponent(boleto.qrCode || '')}`;
 
         let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bradesco no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
         const valorStr = `R$ ${Number(boleto.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -2070,7 +2074,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                   `&conta=${encodeURIComponent(b.conta)}` +
                                   `&carteira=${b.carteira}` +
                                   `&beneficiario=${encodeURIComponent(b.beneficiario)}` +
-                                  `&cnpj_beneficiario=${encodeURIComponent(b.cnpjBeneficiario)}`;
+                                  `&cnpj_beneficiario=${encodeURIComponent(b.cnpjBeneficiario)}` +
+                                  `&qr_code=${encodeURIComponent(b.qrCode || '')}`;
                                 window.open(url, '_blank');
                               }}
                               className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"

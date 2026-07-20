@@ -971,31 +971,137 @@ async function startServer() {
 
         console.log('[Bradesco API mTLS] Bearer Token obtido com sucesso!');
         
-        // Payload de Registro do Boleto Bradesco Oficial
+        // Payload de Registro do Boleto Bradesco Oficial com QR Code (Formato Híbrido Real)
+        const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '');
+        const nroCpfCnpjBenef = Number(cleanCnpj.substring(0, 8)) || 0;
+        const filCpfCnpjBenef = cleanCnpj.substring(8, 12) || '0001';
+        const digCpfCnpjBenef = Number(cleanCnpj.substring(12, 14)) || 0;
+
+        const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
+        const cleanAccount = account.split('-')[0].replace(/\D/g, '').padStart(7, '0');
+        const cnegocCobr = `${cleanAgency}0000000${cleanAccount}`;
+
+        const cleanCep = pagadorCep.replace(/\D/g, '');
+        const ccepSacdoTitlo = Number(cleanCep.substring(0, 5)) || 0;
+        const ccomplCepSacdo = Number(cleanCep.substring(5, 8)) || 0;
+
+        const docDigits = pagadorDoc.replace(/\D/g, '');
+        const nroCpfCnpjSacdo = Number(docDigits) || 0;
+        const indCpfCnpjSacdo = docDigits.length > 11 ? 2 : 1;
+
+        const numMatch = pagadorEnd.match(/\d+/);
+        const enroLogdrSacdo = numMatch ? numMatch[0].substring(0, 10) : 'S/N';
+
         const registerPayload = {
-          nuCnpjBeneficiario: cnpjBeneficiario.replace(/\D/g, ''),
-          nuAgenciaBeneficiario: Number(agency.replace(/\D/g, '')),
-          nuContaBeneficiario: Number(account.replace(/\D/g, '')),
-          nuDigitoContaBeneficiario: accountDigit,
-          idCarteira: Number(wallet.replace(/\D/g, '')),
-          nuBoleto: nossoNumero,
-          dtEmissao: emissao.split('-').reverse().join('.'), // DD.MM.YYYY
-          dtVencimento: vencimento.split('-').reverse().join('.'),
-          vlNominal: Math.round(valor * 100), // Em centavos
-          pagador: {
-            noPagador: pagadorNome.substring(0, 40),
-            nuCpfCnpjPagador: pagadorDoc.replace(/\D/g, ''),
-            nuCep: pagadorCep.replace(/\D/g, ''),
-            noLogradouro: pagadorEnd.substring(0, 40),
-            nuLogradouro: "S/N",
-            noBairro: "Centro",
-            noCidade: pagadorObj.Cidade || "Itamaraju",
-            noUf: pagadorObj.Estado || pagadorObj.Uf || "BA"
-          }
+          ctitloCobrCdent: Number(nossoNumero.replace(/\D/g, '')) || 0,
+          registrarTitulo: 1,
+          nroCpfCnpjBenef: nroCpfCnpjBenef,
+          codUsuario: "APISERVIC",
+          filCpfCnpjBenef: filCpfCnpjBenef,
+          tipoAcesso: 2,
+          digCpfCnpjBenef: digCpfCnpjBenef,
+          cpssoaJuridContr: "",
+          ctpoContrNegoc: "",
+          cidtfdProdCobr: Number(wallet) || 9,
+          nseqContrNegoc: "",
+          cnegocCobr: cnegocCobr,
+          filler: "",
+          eNseqContrNegoc: "",
+          tipoRegistro: 1,
+          codigoBanco: 237,
+          cprodtServcOper: "",
+          demisTitloCobr: emissao.split('-').reverse().join('.'),
+          ctitloCliCdent: String(faturaId).substring(0, 25),
+          dvctoTitloCobr: vencimento.split('-').reverse().join('.'),
+          cidtfdTpoVcto: "",
+          vnmnalTitloCobr: Math.round(valor * 100),
+          cindcdEconmMoeda: 9,
+          cespceTitloCobr: 2,
+          qmoedaNegocTitlo: 0,
+          ctpoProteTitlo: 0,
+          cindcdAceitSacdo: "N",
+          ctpoPrzProte: 0,
+          ctpoPrzDecurs: 0,
+          ctpoProteDecurs: 0,
+          cctrlPartcTitlo: 0,
+          cindcdPgtoParcial: "N",
+          cformaEmisPplta: "02",
+          qtdePgtoParcial: 0,
+          qtdDecurPrz: "0",
+          codNegativacao: "0",
+          diasNegativacao: "0",
+          ptxJuroVcto: 0,
+          filler1: "",
+          vdiaJuroMora: 0,
+          pmultaAplicVcto: 0,
+          qdiaInicJuro: 0,
+          vmultaAtrsoPgto: 0,
+          pdescBonifPgto01: 0,
+          qdiaInicMulta: 0,
+          vdescBonifPgto01: 0,
+          pdescBonifPgto02: 0,
+          dlimDescBonif1: "",
+          vdescBonifPgto02: 0,
+          pdescBonifPgto03: 0,
+          dlimDescBonif2: "",
+          vdescBonifPgto03: 0,
+          ctpoPrzCobr: 0,
+          dlimDescBonif3: "",
+          pdescBonifPgto: 0,
+          dlimBonifPgto: "",
+          vdescBonifPgto: 0,
+          vabtmtTitloCobr: 0,
+          filler2: "",
+          viofPgtoTitlo: 0,
+          isacdoTitloCobr: pagadorNome.substring(0, 40),
+          enroLogdrSacdo: enroLogdrSacdo,
+          elogdrSacdoTitlo: pagadorEnd.substring(0, 40),
+          ecomplLogdrSacdo: "",
+          ccepSacdoTitlo: ccepSacdoTitlo,
+          ebairoLogdrSacdo: (pagadorObj.Bairro || pagadorObj.bairro || "Centro").substring(0, 40),
+          ccomplCepSacdo: ccomplCepSacdo,
+          imunSacdoTitlo: (pagadorObj.Cidade || pagadorObj.cidade || "Itamaraju").substring(0, 30),
+          indCpfCnpjSacdo: indCpfCnpjSacdo,
+          csglUfSacdo: (pagadorObj.Estado || pagadorObj.Uf || "BA").substring(0, 2),
+          renderEletrSacdo: "",
+          cdddFoneSacdo: 0,
+          nroCpfCnpjSacdo: nroCpfCnpjSacdo,
+          bancoDeb: 0,
+          cfoneSacdoTitlo: 0,
+          agenciaDebDv: 0,
+          agenciaDeb: 0,
+          bancoCentProt: 0,
+          contaDeb: 0,
+          isacdrAvalsTitlo: "",
+          agenciaDvCentPr: 0,
+          enroLogdrSacdr: "0",
+          elogdrSacdrAvals: "",
+          ecomplLogdrSacdr: "",
+          ccomplCepSacdr: 0,
+          ebairoLogdrSacdr: "",
+          csglUfSacdr: "",
+          ccepSacdrTitlo: 0,
+          imunSacdrAvals: "",
+          indCpfCnpjSacdr: 0,
+          renderEletrSacdr: "",
+          nroCpfCnpjSacdr: 0,
+          cdddFoneSacdr: 0,
+          filler3: "0",
+          cfoneSacdrTitlo: 0,
+          iconcPgtoSpi: "",
+          fase: "1",
+          cindcdCobrMisto: "S",
+          ialiasAdsaoCta: "",
+          ilinkGeracQrcd: "",
+          caliasAdsaoCta: "",
+          wqrcdPdraoMercd: "",
+          validadeAposVencimento: "",
+          filler4: "",
+          idLoc: ""
         };
 
         const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-        const registerPath = '/v1/boleto/registrar';
+        const registerPath = '/boleto-hibrido/cobranca-registro/v1/gerarBoleto';
 
         // Chamada de registro mTLS
         const regRes: any = await new Promise((resolve, reject) => {
@@ -1006,7 +1112,7 @@ async function startServer() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken}`
+              'Authorization': accessToken.startsWith('Bearer') ? accessToken : `Bearer ${accessToken}`
             },
             cert: certContent,
             key: keyContent,
@@ -1030,8 +1136,41 @@ async function startServer() {
           req.end();
         });
 
-        console.log('[Bradesco API mTLS] Boleto registrado via API oficial com sucesso!');
+        console.log('[Bradesco API mTLS] Boleto registrado via API oficial com sucesso!', regRes);
         apiLog = 'Registrado com sucesso via API Bradesco Oficial com mTLS.';
+
+        // Usar dados reais retornados pelo banco se presentes
+        const finalLinhaDigitavel = regRes.linhaDig10 || regRes.linhaDig || (regRes.dados && regRes.dados.linhaDig10) || linhaDigitavel;
+        const finalBarcode = regRes.codBarras10 || regRes.codBarras || (regRes.dados && regRes.dados.codBarras10) || barcode;
+        const finalQrCode = regRes.wqrcdPdraoMercd || regRes.semvQrcode || (regRes.dados && (regRes.dados.wqrcdPdraoMercd || regRes.dados.semvQrcode)) || '';
+
+        return res.json({
+          success: true,
+          mocked: false,
+          apiLog,
+          env: env,
+          boleto: {
+            nossoNumero,
+            linhaDigitavel: finalLinhaDigitavel,
+            barcodeValue: finalBarcode,
+            qrCode: finalQrCode,
+            valor,
+            vencimento,
+            emissao,
+            agencia: agency,
+            conta: `${account}-${accountDigit}`,
+            carteira: wallet,
+            cnpjBeneficiario,
+            beneficiario,
+            pagador: {
+              nome: pagadorNome,
+              documento: pagadorDoc,
+              endereco: pagadorEnd,
+              cep: pagadorCep
+            }
+          }
+        });
+
       } catch (apiError: any) {
         console.error('[Bradesco API mTLS] Erro na integração com a API Bradesco:', apiError.message);
         return res.status(400).json({
@@ -1039,33 +1178,6 @@ async function startServer() {
           error: `Erro ao registrar boleto na API Bradesco: ${apiError.message}`
         });
       }
-
-      // Retorna os dados do boleto gerado
-      res.json({
-        success: true,
-        mocked: false,
-        apiLog,
-        env: env,
-        boleto: {
-          nossoNumero,
-          linhaDigitavel,
-          barcodeValue: barcode,
-          valor,
-          vencimento,
-          emissao,
-          agencia: agency,
-          conta: `${account}-${accountDigit}`,
-          carteira: wallet,
-          cnpjBeneficiario,
-          beneficiario,
-          pagador: {
-            nome: pagadorNome,
-            documento: pagadorDoc,
-            endereco: pagadorEnd,
-            cep: pagadorCep
-          }
-        }
-      });
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao processar boleto Bradesco.' });
     }
@@ -1087,7 +1199,8 @@ async function startServer() {
         conta,
         carteira,
         beneficiario,
-        cnpj_beneficiario
+        cnpj_beneficiario,
+        qr_code
       } = req.query;
 
       const vVal = Number(valor || 100.00);
@@ -1423,6 +1536,28 @@ async function startServer() {
               ${barcode}
             </div>
           </div>
+
+          <!-- QR Code Area (Hybrid Pix) -->
+          ${qr_code ? `
+          <div class="mt-6 border border-gray-300 rounded-lg p-3 bg-red-50/10 flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(String(qr_code))}" alt="QR Code Pix" class="w-24 h-24 border border-gray-200 rounded p-1 bg-white" />
+              <div class="space-y-1">
+                <span class="text-xs font-bold text-gray-800 uppercase block tracking-wider">PIX - Pagamento Instantâneo (Boleto Híbrido)</span>
+                <p class="text-[10px] text-gray-600 max-w-md">Escaneie o QR Code ao lado com o aplicativo do seu banco para realizar o pagamento instantâneo deste boleto via Pix.</p>
+                <div class="pt-1">
+                  <button onclick="navigator.clipboard.writeText('${String(qr_code).replace(/'/g, "\\'")}')" class="px-2 py-1 bg-red-600 hover:bg-red-700 text-white font-bold text-[9px] rounded shadow cursor-pointer transition">
+                    Copiar Código Pix (Copia e Cola)
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="text-right pr-4 shrink-0">
+              <span class="text-[9px] font-bold text-gray-400 block uppercase">Chave Pix Cadastrada</span>
+              <span class="text-xs font-mono font-bold text-red-600">BRADESCO HÍBRIDO</span>
+            </div>
+          </div>
+          ` : ''}
 
         </div>
 
