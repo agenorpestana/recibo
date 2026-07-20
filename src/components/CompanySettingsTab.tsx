@@ -56,6 +56,14 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bradescoError, setBradescoError] = useState<string | null>(null);
   const [bradescoEnvSelection, setBradescoEnvSelection] = useState<'sandbox' | 'production'>('sandbox');
 
+  // Estados para edição manual dos dados do Sacado (Payer)
+  const [sacadoNome, setSacadoNome] = useState('');
+  const [sacadoCnpjCpf, setSacadoCnpjCpf] = useState('');
+  const [sacadoCep, setSacadoCep] = useState('');
+  const [sacadoEndereco, setSacadoEndereco] = useState('');
+  const [sacadoCidade, setSacadoCidade] = useState('');
+  const [sacadoUf, setSacadoUf] = useState('');
+
   // Estados adicionais para busca por período de faturas
   const [faturaSearchMode, setFaturaSearchMode] = useState<'id' | 'periodo'>('id');
   const [startDate, setStartDate] = useState(() => {
@@ -275,6 +283,38 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
       setFetchedFatura(data);
 
+      // Preencher campos de edição do sacado
+      setSacadoNome(data.Cliente?.Nome || data.NomeCliente || data.NomeClienteFornecedor || '');
+      const docVal = data.Cliente?.CnpjCpf || data.DocumentoClienteFornecedor || '';
+      setSacadoCnpjCpf(docVal === 'N/A' ? '' : docVal);
+      setSacadoCep(data.Cliente?.Cep || data.Cliente?.cep || '');
+      setSacadoCidade(data.Cliente?.Cidade || data.Cliente?.cidade || 'Itamaraju');
+      setSacadoUf(data.Cliente?.Estado || data.Cliente?.Uf || data.Cliente?.uf || 'BA');
+      
+      let formattedAddr = '';
+      if (data.Cliente?.Endereco) {
+        if (typeof data.Cliente.Endereco === 'object') {
+          const e = data.Cliente.Endereco;
+          const logradouro = e.Logradouro || e.Rua || e.Street || e.street || '';
+          const numero = e.Numero || e.Number || e.number || '';
+          const bairro = e.Bairro || e.Neighborhood || e.neighborhood || '';
+          const cidade = e.Cidade || e.City || e.city || '';
+          const uf = e.Estado || e.State || e.state || e.Uf || e.uf || '';
+          const parts = [
+            logradouro ? (numero ? `${logradouro}, ${numero}` : logradouro) : '',
+            bairro,
+            cidade ? (uf ? `${cidade}-${uf}` : cidade) : ''
+          ].filter(Boolean);
+          formattedAddr = parts.join(' - ');
+        } else {
+          formattedAddr = String(data.Cliente.Endereco);
+        }
+      }
+      if (!formattedAddr) {
+        formattedAddr = data.Cliente?.address || '';
+      }
+      setSacadoEndereco(formattedAddr);
+
       const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
       
       const rawVencimento = data.Vencimento || data.DataVencimento;
@@ -465,11 +505,25 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       setBradescoError(null);
       setBradescoBoletoResult(null);
 
+      const customFatura = {
+        ...fetchedFatura,
+        Cliente: {
+          ...fetchedFatura.Cliente,
+          Nome: sacadoNome,
+          CnpjCpf: sacadoCnpjCpf,
+          Cep: sacadoCep,
+          Endereco: sacadoEndereco,
+          Cidade: sacadoCidade,
+          Estado: sacadoUf,
+          Uf: sacadoUf
+        }
+      };
+
       const res = await fetch('/api/integration/bradesco/gerar-boleto', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fatura: fetchedFatura,
+          fatura: customFatura,
           envSelection: bradescoEnvSelection
         })
       });
@@ -2035,6 +2089,84 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       {bradescoError && (
                         <div className="text-[10px] text-red-700 bg-red-100/60 p-2 rounded border border-red-200">
                           {bradescoError}
+                        </div>
+                      )}
+
+                      {!bradescoBoletoResult && (
+                        <div className="bg-white p-3 rounded-lg border border-red-100 space-y-2.5 text-xs">
+                          <span className="block text-[10px] font-bold text-red-600 uppercase tracking-wider mb-1">Dados de Registro do Sacado (Editável)</span>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">Nome / Razão Social</label>
+                              <input
+                                type="text"
+                                value={sacadoNome}
+                                onChange={(e) => setSacadoNome(e.target.value)}
+                                placeholder="Nome do pagador"
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800 focus:border-red-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">CPF ou CNPJ</label>
+                              <input
+                                type="text"
+                                value={sacadoCnpjCpf}
+                                onChange={(e) => setSacadoCnpjCpf(e.target.value)}
+                                placeholder="CPF ou CNPJ do pagador"
+                                className={`w-full rounded border px-2 py-1 text-xs font-mono text-gray-800 focus:border-red-500 focus:outline-none ${!sacadoCnpjCpf ? 'border-amber-400 bg-amber-50/20' : 'border-gray-200'}`}
+                              />
+                              {!sacadoCnpjCpf && (
+                                <span className="text-[9px] text-amber-600 font-bold block">⚠️ CPF/CNPJ é obrigatório para registrar!</span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">CEP</label>
+                              <input
+                                type="text"
+                                value={sacadoCep}
+                                onChange={(e) => setSacadoCep(e.target.value)}
+                                placeholder="00000-000"
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800 focus:border-red-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">Endereço (Rua, Número, Bairro)</label>
+                              <input
+                                type="text"
+                                value={sacadoEndereco}
+                                onChange={(e) => setSacadoEndereco(e.target.value)}
+                                placeholder="Rua, Número - Bairro"
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800 focus:border-red-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">Cidade</label>
+                              <input
+                                type="text"
+                                value={sacadoCidade}
+                                onChange={(e) => setSacadoCidade(e.target.value)}
+                                placeholder="Cidade"
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800 focus:border-red-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[9px] font-bold text-gray-500 uppercase">Estado (UF)</label>
+                              <input
+                                type="text"
+                                value={sacadoUf}
+                                onChange={(e) => setSacadoUf(e.target.value)}
+                                placeholder="UF"
+                                maxLength={2}
+                                className="w-full rounded border border-gray-200 px-2 py-1 text-xs text-gray-800 focus:border-red-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
                         </div>
                       )}
 
