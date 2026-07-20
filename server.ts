@@ -611,6 +611,60 @@ async function startServer() {
     }
   });
 
+  // Pesquisa financeiro no Bom Controle
+  app.get('/api/integration/bom-controle/financeiro/pesquisar', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+
+      let start = req.query.dataInicio ? String(req.query.dataInicio) : '2020-01-01';
+      if (start.length === 10) start += ' 00:00:00';
+
+      let end = req.query.dataTermino ? String(req.query.dataTermino) : '2030-12-31';
+      if (end.length === 10) end += ' 23:59:59';
+
+      const url = new URL('https://apinewintegracao.bomcontrole.com.br/integracao/Financeiro/Pesquisar');
+      url.searchParams.append('dataInicio', start);
+      url.searchParams.append('dataTermino', end);
+      url.searchParams.append('tipoData', req.query.tipoData ? String(req.query.tipoData) : 'Criacao');
+
+      if (req.query.textoPesquisa) {
+        url.searchParams.append('textoPesquisa', String(req.query.textoPesquisa));
+      } else if (req.query.pesquisa) {
+        url.searchParams.append('textoPesquisa', String(req.query.pesquisa));
+      }
+
+      if (req.query.idsEmpresa) url.searchParams.append('idsEmpresa', String(req.query.idsEmpresa));
+      if (req.query.idsCliente) url.searchParams.append('idsCliente', String(req.query.idsCliente));
+      if (req.query.idsFornecedor) url.searchParams.append('idsFornecedor', String(req.query.idsFornecedor));
+
+      const itensPorPagina = req.query['paginacao.itensPorPagina'] || req.query.itensPorPagina || '50';
+      const numeroDaPagina = req.query['paginacao.numeroDaPagina'] || req.query.numeroDaPagina || '1';
+
+      url.searchParams.append('paginacao.itensPorPagina', String(itensPorPagina));
+      url.searchParams.append('paginacao.numeroDaPagina', String(numeroDaPagina));
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return res.status(response.status).json({ error: `Erro no Bom Controle Financeiro: ${response.status} - ${errorText}` });
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao pesquisar financeiro no Bom Controle.' });
+    }
+  });
+
   // Envia mensagem via Whaticket
   app.post('/api/integration/whaticket/send', async (req, res) => {
     try {

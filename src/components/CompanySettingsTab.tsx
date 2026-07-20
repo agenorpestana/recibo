@@ -89,11 +89,14 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
   // Estados para busca direta de Clientes e Empresas no Bom Controle
   const [bomSearchQuery, setBomSearchQuery] = useState('');
-  const [bomSearchType, setBomSearchType] = useState<'cliente' | 'empresa'>('cliente');
+  const [bomSearchType, setBomSearchType] = useState<'cliente' | 'empresa' | 'financeiro'>('cliente');
   const [bomSearchLoading, setBomSearchLoading] = useState(false);
   const [bomSearchResults, setBomSearchResults] = useState<any[] | null>(null);
   const [bomSearchError, setBomSearchError] = useState<string | null>(null);
   const [bomSelectedDetail, setBomSelectedDetail] = useState<any | null>(null);
+  const [financeiroDataInicio, setFinanceiroDataInicio] = useState('2020-01-01');
+  const [financeiroDataTermino, setFinanceiroDataTermino] = useState('2030-12-31');
+  const [financeiroTipoData, setFinanceiroTipoData] = useState('Criacao');
 
   // --- ESTADOS E REFS PARA SELEÇÃO E ENVIO EM MASSA ---
   const [selectedFaturas, setSelectedFaturas] = useState<Record<string, boolean>>({});
@@ -132,9 +135,14 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
         }
       }
 
-      const endpoint = bomSearchType === 'cliente' 
-        ? `/api/integration/bom-controle/clientes/pesquisar?pesquisa=${encodeURIComponent(bomSearchQuery)}`
-        : `/api/integration/bom-controle/empresas/pesquisar?pesquisa=${encodeURIComponent(bomSearchQuery)}`;
+      let endpoint = '';
+      if (bomSearchType === 'cliente') {
+        endpoint = `/api/integration/bom-controle/clientes/pesquisar?pesquisa=${encodeURIComponent(bomSearchQuery)}`;
+      } else if (bomSearchType === 'empresa') {
+        endpoint = `/api/integration/bom-controle/empresas/pesquisar?pesquisa=${encodeURIComponent(bomSearchQuery)}`;
+      } else if (bomSearchType === 'financeiro') {
+        endpoint = `/api/integration/bom-controle/financeiro/pesquisar?pesquisa=${encodeURIComponent(bomSearchQuery)}&dataInicio=${financeiroDataInicio}&dataTermino=${financeiroDataTermino}&tipoData=${financeiroTipoData}`;
+      }
 
       const res = await fetch(endpoint);
       if (!res.ok) {
@@ -143,7 +151,11 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       }
       
       const data = await res.json();
-      setBomSearchResults(Array.isArray(data) ? data : (data ? [data] : []));
+      if (bomSearchType === 'financeiro') {
+        setBomSearchResults(Array.isArray(data.Itens) ? data.Itens : []);
+      } else {
+        setBomSearchResults(Array.isArray(data) ? data : (data ? [data] : []));
+      }
     } catch (err: any) {
       setBomSearchError(err.message || 'Erro ao realizar a busca.');
     } finally {
@@ -2274,6 +2286,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   >
                     <option value="cliente">Clientes</option>
                     <option value="empresa">Empresas</option>
+                    <option value="financeiro">Financeiro (Movimentações)</option>
                   </select>
 
                   <div className="relative flex-1">
@@ -2282,7 +2295,13 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       value={bomSearchQuery}
                       onChange={(e) => setBomSearchQuery(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleBomSearch(); }}
-                      placeholder={bomSearchType === 'cliente' ? "Nome, CNPJ, CPF ou ID do Cliente" : "Nome ou ID da Empresa"}
+                      placeholder={
+                        bomSearchType === 'cliente'
+                          ? "Nome, CNPJ, CPF ou ID do Cliente"
+                          : bomSearchType === 'empresa'
+                          ? "Nome ou ID da Empresa"
+                          : "Nome ou Descrição da Parcela (Financeiro)"
+                      }
                       className="block w-full rounded-lg border border-gray-300 pl-3 pr-10 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none"
                     />
                   </div>
@@ -2296,6 +2315,45 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                     {bomSearchLoading ? 'Pesquisando...' : 'Pesquisar'}
                   </button>
                 </div>
+
+                {bomSearchType === 'financeiro' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200 text-xs animate-fade-in">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Data Início</label>
+                      <input
+                        type="date"
+                        value={financeiroDataInicio}
+                        onChange={(e) => setFinanceiroDataInicio(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 bg-white focus:border-indigo-500 focus:outline-none text-xs font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Data Término</label>
+                      <input
+                        type="date"
+                        value={financeiroDataTermino}
+                        onChange={(e) => setFinanceiroDataTermino(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 bg-white focus:border-indigo-500 focus:outline-none text-xs font-medium"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Tipo de Data</label>
+                      <select
+                        value={financeiroTipoData}
+                        onChange={(e) => setFinanceiroTipoData(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 bg-white focus:border-indigo-500 focus:outline-none text-xs font-bold"
+                      >
+                        <option value="Criacao">Criação</option>
+                        <option value="DataVencimento">Vencimento</option>
+                        <option value="DataPagamento">Pagamento</option>
+                        <option value="DataCompetencia">Competência</option>
+                        <option value="DataConciliacao">Conciliação</option>
+                        <option value="UltimaAlteracao">Última Alteração</option>
+                        <option value="DataPadrao">Padrão</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {bomSearchError && (
                   <div className="rounded-lg bg-red-50 p-3 border border-red-200 text-red-800 text-xs flex items-center gap-2 animate-fade-in">
@@ -2320,45 +2378,67 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                     ) : (
                       <div className="max-h-[200px] overflow-y-auto divide-y divide-gray-100">
                         {bomSearchResults.map((item: any, idx: number) => {
-                          const id = item.Id || item.id || idx;
-                          let name = 'N/A';
-                          if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
-                            name = item.PessoaJuridica.NomeFantasia || item.PessoaJuridica.RazaoSocial || 'N/A';
-                          } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
-                            name = item.PessoaFisica.Nome || 'N/A';
-                          } else {
-                            name = item.Nome || item.RazaoSocial || item.NomeRazaoSocial || item.NomeFantasia || 'N/A';
-                          }
+                          let id = '';
+                          let name = '';
+                          let doc = '';
+                          let subText = '';
 
-                          let doc = 'N/A';
-                          if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
-                            doc = item.PessoaJuridica.Documento || 'N/A';
-                          } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
-                            doc = item.PessoaFisica.Documento || 'N/A';
+                          if (bomSearchType === 'financeiro') {
+                            id = item.IdMovimentacaoFinanceiraParcela || String(idx);
+                            name = item.NomeClienteFornecedor || item.Nome || 'N/A';
+                            doc = item.DocumentoClienteFornecedor || 'N/A';
+                            const valorStr = item.Valor ? `R$ ${Number(item.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : '';
+                            const vencStr = item.DataVencimento ? new Date(item.DataVencimento).toLocaleDateString('pt-BR') : '';
+                            subText = `Parcela: ${item.Nome || 'N/A'} • Valor: ${valorStr} • Vencimento: ${vencStr}`;
                           } else {
-                            doc = item.CnpjCpf || item.CpfCnpj || item.Cnpj || item.Cpf || 'N/A';
+                            id = item.Id || item.id || String(idx);
+                            if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
+                              name = item.PessoaJuridica.NomeFantasia || item.PessoaJuridica.RazaoSocial || 'N/A';
+                            } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
+                              name = item.PessoaFisica.Nome || 'N/A';
+                            } else {
+                              name = item.Nome || item.RazaoSocial || item.NomeRazaoSocial || item.NomeFantasia || 'N/A';
+                            }
+
+                            if (item.TipoPessoa === 'Juridica' && item.PessoaJuridica) {
+                              doc = item.PessoaJuridica.Documento || 'N/A';
+                            } else if (item.TipoPessoa === 'Fisica' && item.PessoaFisica) {
+                              doc = item.PessoaFisica.Documento || 'N/A';
+                            } else {
+                              doc = item.CnpjCpf || item.CpfCnpj || item.Cnpj || item.Cpf || 'N/A';
+                            }
+                            subText = `ID: #${id}`;
                           }
 
                           return (
                             <div key={id} className="p-3 flex items-center justify-between gap-3 text-xs hover:bg-gray-50/50">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-mono font-bold text-indigo-850">#{id}</span>
+                                  <span className="font-mono font-bold text-indigo-850">
+                                    {bomSearchType === 'financeiro' ? 'Título' : `#${id}`}
+                                  </span>
                                   <span className="font-bold text-gray-800 truncate">{name}</span>
                                 </div>
-                                <div className="text-[10px] text-gray-400 font-mono mt-0.5">
-                                  Documento/CNPJ/CPF: {doc}
+                                <div className="text-[10px] text-gray-400 mt-0.5 space-y-0.5">
+                                  <div className="font-sans text-gray-500">{subText}</div>
+                                  {doc && doc !== 'N/A' && (
+                                    <div className="font-mono text-indigo-600 font-bold">CNPJ/CPF do Cliente: {doc}</div>
+                                  )}
                                 </div>
                               </div>
-                              {bomSearchType === 'cliente' && (
-                                <button
-                                  onClick={() => handleFetchClientDetail(id)}
-                                  disabled={bomSearchLoading}
-                                  className="px-2.5 py-1 text-[10px] font-bold rounded bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50"
-                                >
-                                  Ver Detalhes
-                                </button>
-                              )}
+                              <button
+                                onClick={() => {
+                                  if (bomSearchType === 'financeiro') {
+                                    setBomSelectedDetail(item);
+                                  } else {
+                                    handleFetchClientDetail(id);
+                                  }
+                                }}
+                                disabled={bomSearchLoading}
+                                className="px-2.5 py-1 text-[10px] font-bold rounded bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50 shrink-0"
+                              >
+                                Ver Detalhes
+                              </button>
                             </div>
                           );
                         })}
@@ -2369,6 +2449,83 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                 {/* Detalhes expandidos do Cliente */}
                 {bomSelectedDetail && (() => {
+                  if (bomSelectedDetail.IdMovimentacaoFinanceiraParcela) {
+                    const mov = bomSelectedDetail;
+                    const id = mov.IdMovimentacaoFinanceiraParcela;
+                    const name = mov.NomeClienteFornecedor || mov.NomeFantasiaClienteFornecedor || mov.Nome || 'N/A';
+                    const doc = mov.DocumentoClienteFornecedor || 'N/A';
+                    const valorStr = mov.Valor ? `R$ ${Number(mov.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+                    const vencStr = mov.DataVencimento ? new Date(mov.DataVencimento).toLocaleDateString('pt-BR') : 'N/A';
+                    const quitStr = mov.DataQuitacao ? new Date(mov.DataQuitacao).toLocaleDateString('pt-BR') : 'Pendente';
+                    const formaPgto = mov.NomeFormaPagamento || 'N/A';
+                    const tipoMov = mov.NomeTipoMovimentacao || 'N/A';
+                    const obs = mov.Observacao || '';
+
+                    return (
+                      <div className="bg-gradient-to-br from-emerald-50/10 to-gray-50/60 border border-emerald-150 rounded-xl p-4 space-y-3 animate-fade-in text-xs">
+                        <div className="border-b border-emerald-100 pb-2 flex justify-between items-center">
+                          <h4 className="font-bold text-emerald-900 text-sm flex items-center gap-1">
+                            <CheckCircle className="h-4 w-4 text-emerald-500" />
+                            Detalhes da Movimentação Financeira (Bom Controle)
+                          </h4>
+                          <button 
+                            onClick={() => setBomSelectedDetail(null)}
+                            className="text-[10px] font-bold text-red-500 hover:underline"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans">
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Nome do Cliente</span>
+                            <span className="font-bold text-gray-800">{name}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">ID da Parcela</span>
+                            <span className="font-mono text-gray-800 truncate block">#{id}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">CPF/CNPJ do Cliente</span>
+                            <span className="font-mono text-indigo-700 font-bold">{doc}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Valor da Parcela</span>
+                            <span className="font-mono text-emerald-700 font-bold text-sm">{valorStr}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Data de Vencimento</span>
+                            <span className="font-mono text-gray-850 font-bold">{vencStr}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Data de Quitação</span>
+                            <span className="font-mono text-gray-800">{quitStr}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Forma de Pagamento</span>
+                            <span className="text-gray-800 font-bold">{formaPgto}</span>
+                          </div>
+                          <div>
+                            <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Tipo da Movimentação</span>
+                            <span className="text-gray-800">{tipoMov}</span>
+                          </div>
+                          {mov.Nome && (
+                            <div className="md:col-span-2">
+                              <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Nome da Parcela / Descrição</span>
+                              <span className="text-gray-800 font-sans font-medium">{mov.Nome}</span>
+                            </div>
+                          )}
+                          {obs && (
+                            <div className="md:col-span-2">
+                              <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Observação</span>
+                              <span className="text-gray-800 font-sans whitespace-pre-wrap">{obs}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   const id = bomSelectedDetail.Id || bomSelectedDetail.id;
                   
                   let name = 'N/A';
