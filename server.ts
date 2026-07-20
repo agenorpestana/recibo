@@ -4,6 +4,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import https from 'https';
 import querystring from 'querystring';
+import nodemailer from 'nodemailer';
 import db from './server-db';
 
 async function startServer() {
@@ -1297,6 +1298,266 @@ async function startServer() {
       }
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao processar boleto Bradesco.' });
+    }
+  });
+
+  // POST: Consultar status do boleto Bradesco via API
+  app.post('/api/integration/bradesco/consultar-status', async (req, res) => {
+    try {
+      const settings = await db.getIntegrationSettings();
+      const companySettings = await db.getSettings();
+
+      const { fatura, envSelection } = req.body;
+      if (!fatura) {
+        return res.status(400).json({ error: 'Os dados da fatura são obrigatórios.' });
+      }
+
+      const env = envSelection || settings.bradesco_env || 'sandbox';
+      const isProduction = env === 'production';
+
+      const clientId = settings.bradesco_client_id;
+      const clientSecret = settings.bradesco_client_secret;
+      const certContent = settings.bradesco_cert;
+      const keyContent = settings.bradesco_key;
+
+      const faturaId = fatura.Id || fatura.id || Math.floor(Math.random() * 100000);
+      let nossoNumero = fatura.NossoNumero || fatura.nossoNumero || `09${String(faturaId).padStart(9, '0')}`;
+      nossoNumero = nossoNumero.replace(/\D/g, '');
+
+      // Se não houver credenciais e for ambiente sandbox, simula resposta amigável para teste
+      if (!clientId || !clientSecret || !certContent || !keyContent) {
+        if (!isProduction) {
+          // Simula com base no ID da fatura para dar variabilidade realista
+          const isSimulatedPaid = Number(faturaId) % 2 === 0;
+          return res.json({
+            success: true,
+            quitado: isSimulatedPaid,
+            status: isSimulatedPaid ? 'LIQUIDADO' : 'REGISTRADO',
+            dataMovimentacao: isSimulatedPaid ? new Date().toISOString().split('T')[0] : '',
+            simulated: true,
+            message: 'Consulta simulada com sucesso (Credenciais da API Bradesco não configuradas ou incompletas).'
+          });
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: 'As credenciais da API Bradesco (Client ID, Client Secret, Certificado Público e Chave Privada) são obrigatórias para consulta em ambiente de Produção.'
+          });
+        }
+      }
+
+      const agency = settings.bradesco_agency || '0123';
+      const wallet = settings.bradesco_wallet || '09';
+      const cnpjBeneficiario = settings.bradesco_cnpj || companySettings.cnpj || '44.285.891/0001-45';
+      const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '');
+
+      try {
+        console.log(`[Bradesco API mTLS] Iniciando autenticação para consulta. Ambiente: ${env.toUpperCase()}`);
+        const tokenHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+        const tokenPath = '/auth/server-mtls/v2/token';
+
+        const authBody = querystring.stringify({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret
+        });
+
+        // Requisição mTLS para obter Token
+        const tokenRes: any = await new Promise((resolve, reject) => {
+          const reqOpts = {
+            hostname: tokenHost,
+            port: 443,
+            path: tokenPath,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+              'Content-Length': Buffer.byteLength(authBody)
+            },
+            cert: certContent,
+            key: keyContent,
+            passphrase: settings.bradesco_passphrase || undefined,
+            rejectUnauthorized: false
+          };
+
+          const req = https.request(reqOpts, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+              } else {
+                reject(new Error(`Erro HTTP Autenticação ${res.statusCode}: ${data}`));
+              }
+            });
+          });
+
+          req.on('error', (e) => reject(e));
+          req.write(authBody);
+          req.end();
+        });
+
+        const accessToken = tokenRes.access_token;
+        if (!accessToken) {
+          throw new Error('access_token não retornado de Bradesco.');
+        }
+
+        // Consultar Status via pesquisarBoleto
+        const queryHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
+        const queryPath = '/boleto-hibrido/cobranca-registro/v1/pesquisarBoleto';
+
+        const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
+        const cleanWallet = wallet.replace(/\D/g, '').padStart(2, '0');
+
+        const queryPayload = {
+          nuAgencia: Number(cleanAgency) || 123,
+          nuCarteira: Number(cleanWallet) || 9,
+          nuNossoNumero: nossoNumero,
+          cdBeneficiario: cleanCnpj
+        };
+
+        const queryRes: any = await new Promise((resolve, reject) => {
+          const reqOpts = {
+            hostname: queryHost,
+            port: 443,
+            path: queryPath,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': accessToken.startsWith('Bearer') ? accessToken : `Bearer ${accessToken}`
+            },
+            cert: certContent,
+            key: keyContent,
+            passphrase: settings.bradesco_passphrase || undefined,
+            rejectUnauthorized: false
+          };
+
+          const req = https.request(reqOpts, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
+              } else {
+                reject(new Error(`Erro HTTP Consulta ${res.statusCode}: ${data}`));
+              }
+            });
+          });
+
+          req.on('error', (e) => reject(e));
+          req.write(JSON.stringify(queryPayload));
+          req.end();
+        });
+
+        console.log('[Bradesco API mTLS] Consulta de boleto com sucesso!', queryRes);
+
+        const cdStatus = queryRes.cdStatusBoleto || (queryRes.dados && queryRes.dados.cdStatusBoleto) || '';
+        const descStatus = queryRes.descStatusBoleto || (queryRes.dados && queryRes.dados.descStatusBoleto) || '';
+        const dataMovimentacao = queryRes.dtLiquidacao || (queryRes.dados && queryRes.dados.dtLiquidacao) || '';
+
+        let isQuitada = false;
+        const upperDesc = String(descStatus).toUpperCase();
+        if (upperDesc.includes('PAGO') || upperDesc.includes('LIQUIDADO') || upperDesc.includes('BAIXA') || cdStatus === '1' || cdStatus === '2') {
+          isQuitada = true;
+        }
+
+        res.json({
+          success: true,
+          quitado: isQuitada,
+          status: descStatus || cdStatus || 'REGISTRADO',
+          dataMovimentacao,
+          raw: queryRes
+        });
+
+      } catch (apiError: any) {
+        console.error('[Bradesco API mTLS] Erro na consulta de boleto:', apiError.message);
+        // Fallback amigável de sandbox se der erro e não for produção
+        if (!isProduction) {
+          const isSimulatedPaid = Number(faturaId) % 2 === 0;
+          return res.json({
+            success: true,
+            quitado: isSimulatedPaid,
+            status: isSimulatedPaid ? 'LIQUIDADO' : 'REGISTRADO',
+            dataMovimentacao: isSimulatedPaid ? new Date().toISOString().split('T')[0] : '',
+            simulated: true,
+            message: `Consulta simulada após erro da API Bradesco: ${apiError.message}`
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          error: `Erro ao consultar boleto na API Bradesco: ${apiError.message}`
+        });
+      }
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Erro ao processar consulta de status no Bradesco.' });
+    }
+  });
+
+  // POST: Enviar E-mail via SMTP Configurado
+  app.post('/api/integration/email/send', async (req, res) => {
+    try {
+      const { to, subject, body, pdfUrl, filename } = req.body;
+
+      if (!to) {
+        return res.status(400).json({ error: 'O e-mail do destinatário é obrigatório.' });
+      }
+
+      const settings = await db.getIntegrationSettings();
+      const smtpHost = settings.email_smtp_host;
+      const smtpPort = Number(settings.email_smtp_port) || 465;
+      const smtpUser = settings.email_smtp_user;
+      const smtpPass = settings.email_smtp_pass;
+      const smtpSecure = settings.email_smtp_secure;
+      const fromName = settings.email_from_name || 'Unity Automações';
+
+      if (!smtpHost || !smtpUser || !smtpPass) {
+        return res.status(400).json({
+          error: 'As configurações do servidor de e-mail de envio (SMTP) não estão completas. Por favor, configure-as na aba de configurações.'
+        });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure === true || String(smtpSecure) === 'true' || String(smtpSecure) === '1',
+        auth: {
+          user: smtpUser,
+          pass: smtpPass
+        }
+      });
+
+      const attachments: any[] = [];
+      if (pdfUrl) {
+        try {
+          console.log(`[Email SMTP] Baixando anexo a partir de: ${pdfUrl}`);
+          const response = await fetch(pdfUrl);
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            attachments.push({
+              filename: filename || 'boleto.pdf',
+              content: Buffer.from(buffer)
+            });
+          } else {
+            console.warn(`[Email SMTP] Não foi possível baixar o anexo, status HTTP: ${response.status}`);
+          }
+        } catch (downloadErr) {
+          console.error('[Email SMTP] Erro ao obter anexo para o e-mail:', downloadErr);
+        }
+      }
+
+      const isHtml = body.includes('<html') || body.includes('<div') || body.includes('<p');
+      const mailOptions = {
+        from: `"${fromName}" <${smtpUser}>`,
+        to,
+        subject: subject || 'Seu boleto de cobrança',
+        text: isHtml ? body.replace(/<[^>]*>/g, '') : body,
+        html: isHtml ? body : body.replace(/\n/g, '<br>'),
+        attachments
+      };
+
+      await transporter.sendMail(mailOptions);
+      res.json({ success: true, message: 'E-mail enviado com sucesso.' });
+    } catch (e: any) {
+      console.error('[Email SMTP] Erro ao disparar e-mail:', e);
+      res.status(500).json({ error: e.message || 'Erro ao disparar e-mail SMTP.' });
     }
   });
 

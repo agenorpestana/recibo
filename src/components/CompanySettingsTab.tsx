@@ -3,7 +3,7 @@ import { CompanySettings, IntegrationSettings } from '../types';
 import { 
   Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
   HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
-  Search, FileText, Send, Key, RefreshCw, AlertCircle, ExternalLink, 
+  Search, FileText, Send, Key, Mail, RefreshCw, AlertCircle, ExternalLink, 
   Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard
 } from 'lucide-react';
 
@@ -55,6 +55,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bradescoGenerating, setBradescoGenerating] = useState(false);
   const [bradescoError, setBradescoError] = useState<string | null>(null);
   const [bradescoEnvSelection, setBradescoEnvSelection] = useState<'sandbox' | 'production'>('sandbox');
+  const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null);
+  const [statusCheckResults, setStatusCheckResults] = useState<Record<string, { quitado: boolean; status: string; dataMovimentacao?: string; message?: string }>>({});
 
   // Estados para edição manual dos dados do Sacado (Payer)
   const [sacadoNome, setSacadoNome] = useState('');
@@ -106,6 +108,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bulkDelay, setBulkDelay] = useState(10);
   const [bulkLogs, setBulkLogs] = useState<{ id: string; name: string; status: 'pending' | 'loading' | 'sending' | 'success' | 'error'; error?: string }[]>([]);
   const [bulkSendAsMedia, setBulkSendAsMedia] = useState(true);
+  const [bulkActionType, setBulkActionType] = useState<'whatsapp' | 'email' | 'gerar_boleto'>('whatsapp');
   const bulkCancelledRef = React.useRef(false);
 
   // Dynamic companies list
@@ -644,6 +647,63 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
     }
   };
 
+  const handleConsultarStatusBradesco = async (fatura: any) => {
+    if (!fatura) return;
+    const faturaId = String(fatura.Id || fatura.id);
+    try {
+      setCheckingStatusId(faturaId);
+      const res = await fetch('/api/integration/bradesco/consultar-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fatura,
+          envSelection: bradescoEnvSelection
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Erro ${res.status} ao consultar status.`);
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        // Armazena o resultado no estado correspondente à fatura
+        setStatusCheckResults(prev => ({
+          ...prev,
+          [faturaId]: {
+            quitado: data.quitado,
+            status: data.status,
+            dataMovimentacao: data.dataMovimentacao,
+            message: data.message || 'Consulta realizada com sucesso.'
+          }
+        }));
+
+        // Se a fatura consultada for a fatura selecionada ativamente, atualiza as flags de quitado se mudou
+        if (fetchedFatura && String(fetchedFatura.Id) === faturaId && data.quitado !== fetchedFatura.Quitada) {
+          setFetchedFatura((prev: any) => prev ? { ...prev, Quitada: data.quitado } : null);
+        }
+
+        // Atualiza na lista de faturasList se aplicável para refletir visualmente o status atualizado
+        setFaturasList((prevList) => {
+          if (!prevList) return null;
+          return prevList.map((f: any) => {
+            if (String(f.Id) === faturaId) {
+              return { ...f, Quitada: data.quitado };
+            }
+            return f;
+          });
+        });
+      } else {
+        throw new Error(data.error || 'Erro ao processar consulta de status.');
+      }
+    } catch (err: any) {
+      alert(`Falha na consulta Bradesco: ${err.message}`);
+    } finally {
+      setCheckingStatusId(null);
+    }
+  };
+
   const handleSendWhatsApp = async (sendAsMedia: boolean) => {
     if (!whatsAppNumber || whatsAppNumber === '55') {
       setSendError('Por favor, digite um número de telefone válido.');
@@ -849,62 +909,173 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           }
         }
 
-        // Descobre o telefone para envio
-        let targetPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
-        
-        // Se não tiver telefone direto, varre contatos adicionais
-        if (!targetPhone && Array.isArray(data.Cliente?.Contatos)) {
-          const mainContact = data.Cliente.Contatos.find((c: any) => c.Padrao || c.Cobranca) || data.Cliente.Contatos[0];
-          if (mainContact) {
-            targetPhone = mainContact.Telefone || mainContact.Celular;
-          }
-        }
-
-        if (!targetPhone) {
-          throw new Error('Telefone de contato não cadastrado.');
-        }
-
-        let cleanPhone = targetPhone.replace(/\D/g, '');
-        if (cleanPhone.length > 0 && !cleanPhone.startsWith('55')) {
-          cleanPhone = '55' + cleanPhone;
-        }
-
-        // Prepara mensagem substituindo placeholders
-        const valor = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
+        // Formata os placeholders comuns
+        const valorStr = data.Valor !== undefined ? `R$ ${Number(data.Valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'N/A';
         const rawVencimento = data.Vencimento || data.DataVencimento;
-        let vencimento = 'N/A';
+        let vencStr = 'N/A';
         if (rawVencimento) {
           try {
             const date = new Date(rawVencimento);
-            vencimento = date.toLocaleDateString('pt-BR');
+            vencStr = date.toLocaleDateString('pt-BR');
           } catch (e) {}
         }
-        const link = data.LinkBoleto || '';
 
-        let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
-        msg = msg.replace('{valor}', valor)
-                 .replace('{vencimento}', vencimento)
-                 .replace('{link_boleto}', link);
+        // Descobre ou constrói o link do boleto
+        let linkBoleto = data.LinkBoleto || '';
+        if (!linkBoleto) {
+          const queryParams = new URLSearchParams({
+            valor: String(data.Valor || 0),
+            vencimento: String(data.Vencimento || '').split('T')[0],
+            emissao: String(data.DataEmissao || data.Emissao || '').split('T')[0],
+            nome: data.Cliente?.Nome || '',
+            documento: data.Cliente?.CnpjCpf || '',
+            endereco: data.Cliente?.Endereco ? (typeof data.Cliente.Endereco === 'object' ? JSON.stringify(data.Cliente.Endereco) : String(data.Cliente.Endereco)) : '',
+            cep: data.Cliente?.Cep || '',
+            nosso_numero: `09${String(data.Id).padStart(9, '0')}`,
+            agencia: integrationSettings.bradesco_agency || '0123',
+            conta: `${integrationSettings.bradesco_account || '0123456'}-${integrationSettings.bradesco_account_digit || '7'}`,
+            carteira: integrationSettings.bradesco_wallet || '09',
+            beneficiario: integrationSettings.bradesco_beneficiario_nome || 'UNITY AUTOMACOES LTDA.',
+            cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45'
+          });
+          linkBoleto = `${window.location.origin}/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
+        }
 
-        // Atualiza para 'sending'
-        setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+        if (bulkActionType === 'whatsapp') {
+          // Descobre o telefone para envio
+          let targetPhone = data.Cliente?.Celular || data.Cliente?.Telefone || data.Cliente?.CelularWhatsApp;
+          if (!targetPhone && Array.isArray(data.Cliente?.Contatos)) {
+            const mainContact = data.Cliente.Contatos.find((c: any) => c.Padrao || c.Cobranca) || data.Cliente.Contatos[0];
+            if (mainContact) {
+              targetPhone = mainContact.Telefone || mainContact.Celular;
+            }
+          }
 
-        // Envia via API do Whaticket
-        const payload = {
-          number: cleanPhone,
-          body: msg,
-          pdfUrl: sendAsMedia ? link : undefined
-        };
+          if (!targetPhone) {
+            throw new Error('Telefone de contato não cadastrado.');
+          }
 
-        const sendRes = await fetch('/api/integration/whaticket/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+          let cleanPhone = targetPhone.replace(/\D/g, '');
+          if (cleanPhone.length > 0 && !cleanPhone.startsWith('55')) {
+            cleanPhone = '55' + cleanPhone;
+          }
 
-        if (!sendRes.ok) {
-          const errData = await sendRes.json().catch(() => ({}));
-          throw new Error(errData.error || `Erro HTTP ${sendRes.status} no Whaticket`);
+          let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bom Controle no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
+          msg = msg.replace('{valor}', valorStr)
+                   .replace('{vencimento}', vencStr)
+                   .replace('{link_boleto}', linkBoleto);
+
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const payload = {
+            number: cleanPhone,
+            body: msg,
+            pdfUrl: sendAsMedia ? linkBoleto : undefined
+          };
+
+          const sendRes = await fetch('/api/integration/whaticket/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (!sendRes.ok) {
+            const errData = await sendRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro HTTP ${sendRes.status} no Whaticket`);
+          }
+
+        } else if (bulkActionType === 'email') {
+          // Descobre o e-mail para envio
+          let targetEmail = data.Cliente?.Email;
+          if (!targetEmail && Array.isArray(data.Cliente?.Contatos)) {
+            const mainContact = data.Cliente.Contatos.find((c: any) => c.Padrao || c.Cobranca) || data.Cliente.Contatos[0];
+            if (mainContact) {
+              targetEmail = mainContact.Email;
+            }
+          }
+
+          if (!targetEmail) {
+            throw new Error('E-mail do cliente não cadastrado.');
+          }
+
+          let subject = integrationSettings.email_default_subject || 'Seu Boleto Unity Automações - Vencimento {vencimento}';
+          subject = subject.replace('{valor}', valorStr)
+                           .replace('{vencimento}', vencStr)
+                           .replace('{link_boleto}', linkBoleto);
+
+          let body = integrationSettings.email_default_body || 'Prezado(a) Cliente,\n\nSegue em anexo o seu boleto de cobrança no valor de {valor}, com vencimento em {vencimento}.\n\nVocê também pode visualizar seu boleto pelo link: {link_boleto}\n\nAtenciosamente,\nUnity Automações';
+          body = body.replace('{valor}', valorStr)
+                     .replace('{vencimento}', vencStr)
+                     .replace('{link_boleto}', linkBoleto);
+
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const emailPayload = {
+            to: targetEmail,
+            subject,
+            body,
+            pdfUrl: data.LinkBoleto || undefined, // Envia o PDF real se houver LinkBoleto direto do Bom Controle
+            filename: `boleto_fatura_${itemId}.pdf`
+          };
+
+          const sendRes = await fetch('/api/integration/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload)
+          });
+
+          if (!sendRes.ok) {
+            const errData = await sendRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro SMTP HTTP ${sendRes.status}`);
+          }
+
+        } else if (bulkActionType === 'gerar_boleto') {
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const registerPayload = {
+            fatura: data,
+            envSelection: bradescoEnvSelection
+          };
+
+          const regRes = await fetch('/api/integration/bradesco/gerar-boleto', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(registerPayload)
+          });
+
+          if (!regRes.ok) {
+            const errData = await regRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro Bradesco HTTP ${regRes.status}`);
+          }
+
+          const regData = await regRes.json();
+          if (regData.success) {
+            // Constrói link do boleto gerado para visualização
+            const queryParams = new URLSearchParams({
+              valor: String(data.Valor || 0),
+              vencimento: String(data.Vencimento || '').split('T')[0],
+              emissao: String(data.DataEmissao || data.Emissao || '').split('T')[0],
+              nome: data.Cliente?.Nome || '',
+              documento: data.Cliente?.CnpjCpf || '',
+              endereco: data.Cliente?.Endereco ? (typeof data.Cliente.Endereco === 'object' ? JSON.stringify(data.Cliente.Endereco) : String(data.Cliente.Endereco)) : '',
+              cep: data.Cliente?.Cep || '',
+              nosso_numero: regData.boleto?.nossoNumero || `09${String(data.Id).padStart(9, '0')}`,
+              agencia: integrationSettings.bradesco_agency || '0123',
+              conta: `${integrationSettings.bradesco_account || '0123456'}-${integrationSettings.bradesco_account_digit || '7'}`,
+              carteira: integrationSettings.bradesco_wallet || '09',
+              beneficiario: integrationSettings.bradesco_beneficiario_nome || 'UNITY AUTOMACOES LTDA.',
+              cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45'
+            });
+            const generatedLink = `${window.location.origin}/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
+            
+            // Atualiza faturasList local
+            setFaturasList(prev => {
+              if (!prev) return null;
+              return prev.map(f => f.Id === item.Id ? { ...f, LinkBoleto: generatedLink } : f);
+            });
+          } else {
+            throw new Error(regData.error || 'Erro desconhecido ao registrar boleto Bradesco.');
+          }
         }
 
         // Sucesso
@@ -1704,6 +1875,122 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                 )}
               </div>
 
+              {/* Seção: Configuração de E-mail (SMTP) */}
+              <div className="border-t border-gray-100 pt-4 space-y-4">
+                <h4 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Mail className="h-4 w-4 text-indigo-500" />
+                  Configuração de E-mail (Envio de Boletos via SMTP)
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Servidor SMTP</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.email_smtp_host || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_smtp_host: e.target.value })}
+                      placeholder="Ex: smtp.hostinger.com ou smtp.gmail.com"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Porta SMTP</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.email_smtp_port || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_smtp_port: e.target.value })}
+                      placeholder="Ex: 465 ou 587"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Usuário / E-mail de Envio</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.email_smtp_user || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_smtp_user: e.target.value })}
+                      placeholder="seu-email@dominio.com"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Senha SMTP</label>
+                    <input
+                      type="password"
+                      value={integrationSettings.email_smtp_pass || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_smtp_pass: e.target.value })}
+                      placeholder="Sua senha do SMTP"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Nome de Exibição do Remetente</label>
+                    <input
+                      type="text"
+                      value={integrationSettings.email_from_name || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_from_name: e.target.value })}
+                      placeholder="Ex: Unity Automações"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Conexão Segura (SSL)</label>
+                    <div className="flex items-center gap-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="email_smtp_secure"
+                        checked={!!integrationSettings.email_smtp_secure}
+                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_smtp_secure: e.target.checked })}
+                        className="rounded border-gray-300 text-indigo-650 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                      />
+                      <label htmlFor="email_smtp_secure" className="text-xs font-semibold text-gray-600 cursor-pointer select-none">
+                        Usar SSL/TLS (Recomendado para porta 465)
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">Assunto Padrão do E-mail</label>
+                  <input
+                    type="text"
+                    value={integrationSettings.email_default_subject || ''}
+                    onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_default_subject: e.target.value })}
+                    placeholder="Ex: Seu Boleto Unity Automações - Vencimento {vencimento}"
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase">Mensagem Padrão do E-mail</label>
+                  <textarea
+                    rows={4}
+                    value={integrationSettings.email_default_body || ''}
+                    onChange={(e) => setIntegrationSettings({ ...integrationSettings, email_default_body: e.target.value })}
+                    placeholder="Escreva o texto padrão do corpo do e-mail..."
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-150 space-y-1">
+                    <span className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide">Placeholders Suportados:</span>
+                    <div className="grid grid-cols-3 gap-1.5 text-[9px] font-mono text-indigo-650">
+                      <div>{'{valor}'}</div>
+                      <div>{'{vencimento}'}</div>
+                      <div>{'{link_boleto}'}</div>
+                    </div>
+                    <span className="block text-[9px] text-gray-400 pt-1">Eles serão substituídos automaticamente pelos dados reais da fatura. O arquivo PDF do boleto será anexado se disponível.</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Botão de Gravação de Integrações */}
               <div className="flex justify-end pt-2">
                 <button
@@ -1957,6 +2244,25 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                         PDF
                                       </a>
                                     )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConsultarStatusBradesco(f)}
+                                      disabled={checkingStatusId === String(f.Id)}
+                                      className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
+                                      title="Consultar status de pagamento no Bradesco"
+                                    >
+                                      <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                      {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
+                                    </button>
+                                    {statusCheckResults[String(f.Id)] && (
+                                      <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                                        statusCheckResults[String(f.Id)].quitado 
+                                          ? 'bg-green-100 text-green-800' 
+                                          : 'bg-indigo-100 text-indigo-800'
+                                      }`} title={statusCheckResults[String(f.Id)].message}>
+                                        API: {statusCheckResults[String(f.Id)].status}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1986,7 +2292,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                   return (
                     <div className="bg-indigo-50/30 border border-indigo-200 rounded-xl p-4 space-y-4 animate-fade-in">
-                      <div className="flex justify-between items-center border-b border-indigo-150 pb-2.5">
+                      <div className="flex justify-between items-center border-b border-indigo-150 pb-2.5 flex-wrap gap-2">
                         <div className="flex items-center gap-2">
                           <Send className="h-4 w-4 text-indigo-600" />
                           <h4 className="text-xs font-extrabold text-indigo-900 uppercase tracking-wider">
@@ -1998,47 +2304,163 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-bold text-gray-400 uppercase">
-                            Intervalo entre disparos (segundos)
-                          </label>
-                          <input
-                            type="number"
-                            min={2}
-                            disabled={bulkSending}
-                            value={bulkDelay}
-                            onChange={(e) => setBulkDelay(Math.max(2, Number(e.target.value) || 2))}
-                            className="block w-full rounded-lg border border-gray-350 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none bg-white font-bold"
-                          />
-                          <p className="text-[9px] text-gray-400">
-                            Recomendado: 10-15s para respeitar as políticas de antispam do WhatsApp.
-                          </p>
+                      {/* Seleção do Canal de Envio em Massa */}
+                      {!bulkSending && (
+                        <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('whatsapp')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'whatsapp'
+                                ? 'bg-white text-indigo-700 shadow-xs'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            WhatsApp
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('email')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'email'
+                                ? 'bg-white text-indigo-700 shadow-xs'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            E-mail (SMTP)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('gerar_boleto')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'gerar_boleto'
+                                ? 'bg-white text-indigo-700 shadow-xs'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            Gerar Boletos Bradesco
+                          </button>
                         </div>
+                      )}
 
-                        <div className="bg-white/80 p-2.5 rounded-lg border border-indigo-100 text-[10px] text-gray-500 space-y-1">
-                          <span className="font-bold text-indigo-850 uppercase block text-[8px] tracking-wide">
-                            Mensagem que será enviada (Template):
-                          </span>
-                          <p className="font-sans line-clamp-3 italic text-gray-650 bg-gray-50 p-1.5 rounded border border-gray-100 font-mono">
-                            {integrationSettings.whaticket_default_message || 'Nenhum template salvo.'}
-                          </p>
+                      {/* Configurações específicas baseadas no canal */}
+                      {bulkActionType === 'whatsapp' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase">
+                              Intervalo entre disparos (segundos)
+                            </label>
+                            <input
+                              type="number"
+                              min={2}
+                              disabled={bulkSending}
+                              value={bulkDelay}
+                              onChange={(e) => setBulkDelay(Math.max(2, Number(e.target.value) || 2))}
+                              className="block w-full rounded-lg border border-gray-350 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none bg-white font-bold"
+                            />
+                            <p className="text-[9px] text-gray-400">
+                              Recomendado: 10-15s para respeitar as políticas de antispam do WhatsApp.
+                            </p>
+                          </div>
+
+                          <div className="bg-white/80 p-2.5 rounded-lg border border-indigo-100 text-[10px] text-gray-500 space-y-1">
+                            <span className="font-bold text-indigo-850 uppercase block text-[8px] tracking-wide">
+                              Mensagem que será enviada (Template):
+                            </span>
+                            <p className="font-sans line-clamp-3 italic text-gray-650 bg-gray-50 p-1.5 rounded border border-gray-100 font-mono text-[9px]">
+                              {integrationSettings.whaticket_default_message || 'Nenhum template salvo.'}
+                            </p>
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {bulkActionType === 'email' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-bold text-gray-400 uppercase">
+                              Intervalo entre disparos (segundos)
+                            </label>
+                            <input
+                              type="number"
+                              min={2}
+                              disabled={bulkSending}
+                              value={bulkDelay}
+                              onChange={(e) => setBulkDelay(Math.max(2, Number(e.target.value) || 2))}
+                              className="block w-full rounded-lg border border-gray-350 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none bg-white font-bold"
+                            />
+                            <p className="text-[9px] text-gray-400">
+                              Recomendado: 2-5s para envios via servidor de e-mail dedicado.
+                            </p>
+                          </div>
+
+                          <div className="bg-white/80 p-2.5 rounded-lg border border-indigo-100 text-[10px] text-gray-500 space-y-1">
+                            <span className="font-bold text-indigo-850 uppercase block text-[8px] tracking-wide">
+                              Assunto do E-mail (Template):
+                            </span>
+                            <p className="font-sans italic text-gray-650 bg-gray-50 p-1.5 rounded border border-gray-100 font-mono text-[9px] truncate">
+                              {integrationSettings.email_default_subject || 'Sem assunto definido.'}
+                            </p>
+                            <span className="font-bold text-indigo-850 uppercase block text-[8px] tracking-wide pt-1">
+                              Mensagem do E-mail (Template):
+                            </span>
+                            <p className="font-sans line-clamp-2 italic text-gray-650 bg-gray-50 p-1.5 rounded border border-gray-100 font-mono text-[9px]">
+                              {integrationSettings.email_default_body || 'Sem mensagem definida.'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {bulkActionType === 'gerar_boleto' && (
+                        <div className="bg-white/80 p-3 rounded-lg border border-orange-100/60 text-xs text-gray-600 space-y-2">
+                          <span className="font-bold text-orange-800 uppercase block text-[9px] tracking-wide">
+                            Geração de Boletos Bradesco API (mTLS):
+                          </span>
+                          <p className="text-[10px] text-gray-500">
+                            O sistema irá percorrer cada fatura selecionada, buscar os dados cadastrais do cliente no Bom Controle e enviar o registro oficial da cobrança na API do Bradesco.
+                          </p>
+                          <div className="flex items-center gap-3 bg-orange-50/50 p-2 rounded-md border border-orange-100">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase shrink-0">Ambiente Bradesco:</span>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="bulk_bradesco_env"
+                                  checked={bradescoEnvSelection === 'sandbox'}
+                                  onChange={() => setBradescoEnvSelection('sandbox')}
+                                  disabled={bulkSending}
+                                  className="text-orange-500 focus:ring-orange-400"
+                                />
+                                <span className="text-[10px] font-bold text-gray-700">Homologação (Sandbox)</span>
+                              </label>
+                              <label className="flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="bulk_bradesco_env"
+                                  checked={bradescoEnvSelection === 'production'}
+                                  onChange={() => setBradescoEnvSelection('production')}
+                                  disabled={bulkSending}
+                                  className="text-orange-500 focus:ring-orange-400"
+                                />
+                                <span className="text-[10px] font-bold text-gray-700">Produção</span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Progresso e Controles durante Envio */}
                       {bulkSending && (
                         <div className="space-y-3.5 bg-white p-3 rounded-xl border border-indigo-150 shadow-xs">
                           <div className="flex justify-between items-center text-xs">
                             <span className="font-bold text-indigo-900">
-                              Enviando: {bulkProgress} de {bulkTotal} faturas ({Math.round((bulkProgress / bulkTotal) * 100)}%)
+                              Processando: {bulkProgress} de {bulkTotal} faturas ({Math.round((bulkProgress / bulkTotal) * 100)}%)
                             </span>
                             <button
                               type="button"
                               onClick={handleCancelBulkSend}
                               className="px-2.5 py-1 text-[10px] font-bold bg-red-50 text-red-600 border border-red-200 hover:bg-red-650 hover:text-white rounded-md transition-colors"
                             >
-                              Interromper Envio
+                              Interromper Operação
                             </button>
                           </div>
 
@@ -2051,8 +2473,8 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                           {/* Console de logs / Termômetro de disparos */}
                           <div className="space-y-1">
-                            <span className="block text-[9px] font-bold uppercase text-gray-400">Status dos Disparos em Tempo Real:</span>
-                            <div className="bg-gray-900 text-gray-200 font-mono text-[9px] p-2.5 rounded-lg max-h-[140px] overflow-y-auto space-y-1.5 border border-gray-955">
+                            <span className="block text-[9px] font-bold uppercase text-gray-400">Status do Processamento em Tempo Real:</span>
+                            <div className="bg-gray-900 text-gray-200 font-mono text-[9px] p-2.5 rounded-lg max-h-[140px] overflow-y-auto space-y-1.5 border border-gray-800">
                               {bulkLogs.map((log) => {
                                 const statusColors = {
                                   pending: 'text-gray-400',
@@ -2062,15 +2484,15 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                   error: 'text-red-400 font-bold'
                                 };
                                 return (
-                                  <div key={log.id} className="flex justify-between gap-4 items-start border-b border-gray-800 pb-1 last:border-0 last:pb-0">
+                                  <div key={log.id} className="flex justify-between gap-4 items-start border-b border-gray-850 pb-1 last:border-0 last:pb-0">
                                     <span className="truncate">
                                       #{log.id} - {log.name}
                                     </span>
                                     <span className={`shrink-0 uppercase ${statusColors[log.status]}`}>
                                       {log.status === 'pending' && 'Aguardando'}
-                                      {log.status === 'loading' && 'Carregando Cliente'}
-                                      {log.status === 'sending' && 'Enviando...'}
-                                      {log.status === 'success' && '✓ Enviado'}
+                                      {log.status === 'loading' && 'Consultando Cliente'}
+                                      {log.status === 'sending' && (bulkActionType === 'gerar_boleto' ? 'Registrando...' : 'Enviando...')}
+                                      {log.status === 'success' && (bulkActionType === 'gerar_boleto' ? '✓ Registrado' : '✓ Enviado')}
                                       {log.status === 'error' && `✗ Erro: ${log.error || 'Falha'}`}
                                     </span>
                                   </div>
@@ -2083,24 +2505,50 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                       {/* Botões de Ação para Envio */}
                       {!bulkSending && (
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleStartBulkSend(false)}
-                            className="flex-1 px-4 py-2.5 bg-gray-150 hover:bg-gray-200 text-gray-850 border border-gray-200 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-                          >
-                            <Send className="h-3.5 w-3.5 text-indigo-600" />
-                            Disparar Apenas Texto em Massa
-                          </button>
+                        <div className="pt-1">
+                          {bulkActionType === 'whatsapp' && (
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleStartBulkSend(false)}
+                                className="flex-1 px-4 py-2.5 bg-gray-150 hover:bg-gray-200 text-gray-850 border border-gray-200 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                              >
+                                <Send className="h-3.5 w-3.5 text-indigo-600" />
+                                Disparar Apenas Texto via WhatsApp
+                              </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleStartBulkSend(true)}
-                            className="flex-1 px-4 py-2.5 bg-indigo-650 hover:bg-indigo-750 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
-                          >
-                            <FileText className="h-3.5 w-3.5 text-indigo-100" />
-                            Disparar PDF + Legenda em Massa
-                          </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStartBulkSend(true)}
+                                className="flex-1 px-4 py-2.5 bg-indigo-650 hover:bg-indigo-750 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                              >
+                                <FileText className="h-3.5 w-3.5 text-indigo-100" />
+                                Disparar PDF + Mensagem via WhatsApp
+                              </button>
+                            </div>
+                          )}
+
+                          {bulkActionType === 'email' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBulkSend(false)}
+                              className="w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                            >
+                              <Mail className="h-3.5 w-3.5 text-indigo-100" />
+                              Enviar E-mails em Massa via SMTP
+                            </button>
+                          )}
+
+                          {bulkActionType === 'gerar_boleto' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBulkSend(false)}
+                              className="w-full px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                            >
+                              <CreditCard className="h-3.5 w-3.5 text-orange-100" />
+                              Registrar {numSelected} Boletos no Bradesco via API
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2198,25 +2646,60 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       </div>
                     )}
 
-                    {/* Painel Integrado para Geração de Boleto Bradesco */}
+                    {/* Painel Integrado para Geração e Consulta de Boleto Bradesco */}
                     <div className="bg-red-50/40 rounded-lg p-3 border border-red-100 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="flex items-center gap-2">
                           <CreditCard className="h-4 w-4 text-red-600" />
                           <span className="text-xs font-bold text-gray-800">Boleto Bradesco API</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-gray-400 uppercase font-bold">Ambiente:</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleConsultarStatusBradesco(fetchedFatura)}
+                            disabled={checkingStatusId === String(fetchedFatura.Id)}
+                            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0"
+                            title="Consultar status deste boleto na API Bradesco"
+                          >
+                            <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                            {checkingStatusId === String(fetchedFatura.Id) ? 'Verificando...' : 'Consultar Status'}
+                          </button>
+                          
                           <select
                             value={bradescoEnvSelection}
                             onChange={(e) => setBradescoEnvSelection(e.target.value as any)}
-                            className="bg-white border border-gray-200 rounded text-[10px] font-bold px-1.5 py-0.5 text-gray-700 focus:outline-none"
+                            className="bg-white border border-gray-200 rounded text-[10px] font-bold px-1.5 py-0.5 text-gray-700 focus:outline-none h-6"
                           >
                             <option value="sandbox">Sandbox</option>
                             <option value="production">Produção</option>
                           </select>
                         </div>
                       </div>
+
+                      {/* Resultado de status consultado individualmente */}
+                      {statusCheckResults[String(fetchedFatura.Id)] && (
+                        <div className="bg-white p-2.5 rounded border border-indigo-150 text-[11px] space-y-1.5 animate-fade-in shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-gray-500 uppercase text-[9px]">Status Bradesco:</span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
+                              statusCheckResults[String(fetchedFatura.Id)].quitado
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {statusCheckResults[String(fetchedFatura.Id)].status}
+                            </span>
+                          </div>
+                          {statusCheckResults[String(fetchedFatura.Id)].dataMovimentacao && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-400 font-medium">Data Movimentação:</span>
+                              <span className="font-mono font-semibold">{statusCheckResults[String(fetchedFatura.Id)].dataMovimentacao}</span>
+                            </div>
+                          )}
+                          <p className="text-[10px] text-gray-500 italic bg-gray-50 p-1.5 rounded border border-gray-100">
+                            {statusCheckResults[String(fetchedFatura.Id)].message}
+                          </p>
+                        </div>
+                      )}
 
                       {bradescoError && (
                         <div className="text-[10px] text-red-700 bg-red-100/60 p-2 rounded border border-red-200">

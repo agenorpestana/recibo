@@ -57,7 +57,15 @@ const defaultIntegrationSettings: IntegrationSettings = {
   bradesco_wallet: '09',
   bradesco_cnpj: '',
   bradesco_beneficiario_nome: '',
-  bradesco_passphrase: ''
+  bradesco_passphrase: '',
+  email_smtp_host: 'smtp.gmail.com',
+  email_smtp_port: 465,
+  email_smtp_user: '',
+  email_smtp_pass: '',
+  email_smtp_secure: true,
+  email_from_name: 'Unity Automações',
+  email_default_subject: 'Seu boleto da Unity Automações - Vencimento {vencimento}',
+  email_default_body: 'Olá, {cliente}!\n\nSegue em anexo o seu boleto no valor de {valor} com vencimento em {vencimento}.\n\nAtenciosamente,\nEquipe Unity Automações'
 };
 
 const defaultUsers: User[] = [
@@ -242,7 +250,15 @@ class Database {
           { name: 'bradesco_wallet', type: 'VARCHAR(10) DEFAULT NULL' },
           { name: 'bradesco_cnpj', type: 'VARCHAR(25) DEFAULT NULL' },
           { name: 'bradesco_beneficiario_nome', type: 'VARCHAR(255) DEFAULT NULL' },
-          { name: 'bradesco_passphrase', type: 'VARCHAR(255) DEFAULT NULL' }
+          { name: 'bradesco_passphrase', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_smtp_host', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_smtp_port', type: 'INT DEFAULT 465' },
+          { name: 'email_smtp_user', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_smtp_pass', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_smtp_secure', type: 'INT NOT NULL DEFAULT 1' },
+          { name: 'email_from_name', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_default_subject', type: 'VARCHAR(255) DEFAULT NULL' },
+          { name: 'email_default_body', type: 'TEXT DEFAULT NULL' }
         ];
 
         for (const col of bradescoCols) {
@@ -431,7 +447,15 @@ class Database {
         bradesco_wallet: rows[0].bradesco_wallet || '09',
         bradesco_cnpj: rows[0].bradesco_cnpj || '',
         bradesco_beneficiario_nome: rows[0].bradesco_beneficiario_nome || '',
-        bradesco_passphrase: rows[0].bradesco_passphrase || ''
+        bradesco_passphrase: rows[0].bradesco_passphrase || '',
+        email_smtp_host: rows[0].email_smtp_host || 'smtp.gmail.com',
+        email_smtp_port: rows[0].email_smtp_port !== null && rows[0].email_smtp_port !== undefined ? Number(rows[0].email_smtp_port) : 465,
+        email_smtp_user: rows[0].email_smtp_user || '',
+        email_smtp_pass: rows[0].email_smtp_pass || '',
+        email_smtp_secure: rows[0].email_smtp_secure === 1 || !!rows[0].email_smtp_secure,
+        email_from_name: rows[0].email_from_name || 'Unity Automações',
+        email_default_subject: rows[0].email_default_subject || 'Seu boleto da Unity Automações - Vencimento {vencimento}',
+        email_default_body: rows[0].email_default_body || 'Olá, {cliente}!\n\nSegue em anexo o seu boleto no valor de {valor} com vencimento em {vencimento}.\n\nAtenciosamente,\nEquipe Unity Automações'
       };
     } catch (error) {
       console.error('Erro ao obter integration_settings no MySQL:', error);
@@ -449,32 +473,7 @@ class Database {
       const [rows]: any = await pool.query('SELECT id FROM integration_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id, bradesco_env, bradesco_client_id, bradesco_client_secret, bradesco_cert, bradesco_key, bradesco_agency, bradesco_account, bradesco_account_digit, bradesco_wallet, bradesco_cnpj, bradesco_beneficiario_nome, bradesco_passphrase) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [
-            settings.bom_controle_api_key || '',
-            settings.whaticket_api_token || '',
-            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
-            settings.whaticket_default_message || '',
-            settings.auto_send_enabled ? 1 : 0,
-            settings.auto_send_day || 10,
-            settings.auto_send_company_id || '',
-            settings.bradesco_env || 'sandbox',
-            settings.bradesco_client_id || '',
-            settings.bradesco_client_secret || '',
-            settings.bradesco_cert || '',
-            settings.bradesco_key || '',
-            settings.bradesco_agency || '',
-            settings.bradesco_account || '',
-            settings.bradesco_account_digit || '',
-            settings.bradesco_wallet || '09',
-            settings.bradesco_cnpj || '',
-            settings.bradesco_beneficiario_nome || '',
-            settings.bradesco_passphrase || ''
-          ]
-        );
-      } else {
-        await pool.query(
-          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=?, bradesco_env=?, bradesco_client_id=?, bradesco_client_secret=?, bradesco_cert=?, bradesco_key=?, bradesco_agency=?, bradesco_account=?, bradesco_account_digit=?, bradesco_wallet=?, bradesco_cnpj=?, bradesco_beneficiario_nome=?, bradesco_passphrase=? WHERE id=?',
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id, bradesco_env, bradesco_client_id, bradesco_client_secret, bradesco_cert, bradesco_key, bradesco_agency, bradesco_account, bradesco_account_digit, bradesco_wallet, bradesco_cnpj, bradesco_beneficiario_nome, bradesco_passphrase, email_smtp_host, email_smtp_port, email_smtp_user, email_smtp_pass, email_smtp_secure, email_from_name, email_default_subject, email_default_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             settings.bom_controle_api_key || '',
             settings.whaticket_api_token || '',
@@ -495,6 +494,47 @@ class Database {
             settings.bradesco_cnpj || '',
             settings.bradesco_beneficiario_nome || '',
             settings.bradesco_passphrase || '',
+            settings.email_smtp_host || 'smtp.gmail.com',
+            settings.email_smtp_port || 465,
+            settings.email_smtp_user || '',
+            settings.email_smtp_pass || '',
+            settings.email_smtp_secure ? 1 : 0,
+            settings.email_from_name || 'Unity Automações',
+            settings.email_default_subject || 'Seu boleto da Unity Automações - Vencimento {vencimento}',
+            settings.email_default_body || 'Olá, {cliente}!\n\nSegue em anexo o seu boleto no valor de {valor} com vencimento em {vencimento}.\n\nAtenciosamente,\nEquipe Unity Automações'
+          ]
+        );
+      } else {
+        await pool.query(
+          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=?, bradesco_env=?, bradesco_client_id=?, bradesco_client_secret=?, bradesco_cert=?, bradesco_key=?, bradesco_agency=?, bradesco_account=?, bradesco_account_digit=?, bradesco_wallet=?, bradesco_cnpj=?, bradesco_beneficiario_nome=?, bradesco_passphrase=?, email_smtp_host=?, email_smtp_port=?, email_smtp_user=?, email_smtp_pass=?, email_smtp_secure=?, email_from_name=?, email_default_subject=?, email_default_body=? WHERE id=?',
+          [
+            settings.bom_controle_api_key || '',
+            settings.whaticket_api_token || '',
+            settings.whaticket_api_url || 'https://apichat.unityautomacoes.com.br',
+            settings.whaticket_default_message || '',
+            settings.auto_send_enabled ? 1 : 0,
+            settings.auto_send_day || 10,
+            settings.auto_send_company_id || '',
+            settings.bradesco_env || 'sandbox',
+            settings.bradesco_client_id || '',
+            settings.bradesco_client_secret || '',
+            settings.bradesco_cert || '',
+            settings.bradesco_key || '',
+            settings.bradesco_agency || '',
+            settings.bradesco_account || '',
+            settings.bradesco_account_digit || '',
+            settings.bradesco_wallet || '09',
+            settings.bradesco_cnpj || '',
+            settings.bradesco_beneficiario_nome || '',
+            settings.bradesco_passphrase || '',
+            settings.email_smtp_host || 'smtp.gmail.com',
+            settings.email_smtp_port || 465,
+            settings.email_smtp_user || '',
+            settings.email_smtp_pass || '',
+            settings.email_smtp_secure ? 1 : 0,
+            settings.email_from_name || 'Unity Automações',
+            settings.email_default_subject || 'Seu boleto da Unity Automações - Vencimento {vencimento}',
+            settings.email_default_body || 'Olá, {cliente}!\n\nSegue em anexo o seu boleto no valor de {valor} com vencimento em {vencimento}.\n\nAtenciosamente,\nEquipe Unity Automações',
             rows[0].id
           ]
         );

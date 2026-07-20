@@ -121,6 +121,16 @@ export interface IntegrationSettings {
   bradesco_cnpj?: string;
   bradesco_beneficiario_nome?: string;
   bradesco_passphrase?: string;
+
+  // Email SMTP
+  email_smtp_host?: string;
+  email_smtp_port?: number;
+  email_smtp_user?: string;
+  email_smtp_pass?: string;
+  email_smtp_secure?: boolean;
+  email_from_name?: string;
+  email_default_subject?: string;
+  email_default_body?: string;
 }
 
 
