@@ -120,6 +120,7 @@ export interface IntegrationSettings {
   bradesco_wallet?: string;
   bradesco_cnpj?: string;
   bradesco_beneficiario_nome?: string;
+  bradesco_passphrase?: string;
 }
 
 

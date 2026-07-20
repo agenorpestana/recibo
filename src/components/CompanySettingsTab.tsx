@@ -1444,6 +1444,16 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-[9px] font-mono text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                     />
                   </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase">Senha da Chave Privada (Passphrase)</label>
+                    <input
+                      type="password"
+                      value={integrationSettings.bradesco_passphrase || ''}
+                      onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_passphrase: e.target.value })}
+                      placeholder="Senha de decodificação da chave privada (se aplicável)"
+                      className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
 

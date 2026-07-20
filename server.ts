@@ -944,6 +944,7 @@ async function startServer() {
             },
             cert: certContent,
             key: keyContent,
+            passphrase: settings.bradesco_passphrase || undefined,
             rejectUnauthorized: false // Permite conexões locais/sandbox sem validar a cadeia raiz estrita
           };
 
@@ -1116,6 +1117,7 @@ async function startServer() {
             },
             cert: certContent,
             key: keyContent,
+            passphrase: settings.bradesco_passphrase || undefined,
             rejectUnauthorized: false
           };
 
