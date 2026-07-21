@@ -1471,9 +1471,10 @@ async function startServer() {
         const cleanWallet = wallet.replace(/\D/g, '').padStart(2, '0');
         const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '').padStart(14, '0');
 
-        const cpfCnpjUsuario = Number(cleanCnpj.substring(0, 9));
-        const filialCnpjUsuario = Number(cleanCnpj.substring(9, 13));
-        const controleCpfCnpjUsuario = Number(cleanCnpj.substring(13, 15));
+        const isCnpj = cleanCnpj.length > 11;
+        const cpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(0, 8)) : Number(cleanCnpj.substring(0, 9));
+        const filialCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(8, 12)) : 0;
+        const controleCpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(12, 14)) : Number(cleanCnpj.substring(9, 11));
 
         const queryPayload = {
           cpfCnpjUsuario: cpfCnpjUsuario,
