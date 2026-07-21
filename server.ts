@@ -494,6 +494,19 @@ async function startServer() {
       
       // Enriquecer com dados do cliente e da empresa
       const enriched = await enrichFatura(data, apiKey);
+
+      const savedLink = await db.getBradescoBoletoLink(id);
+      if (savedLink) {
+        if (savedLink.startsWith('/')) {
+          const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+          const host = req.get('host');
+          enriched.LinkBoleto = `${protocol}://${host}${savedLink}`;
+        } else {
+          enriched.LinkBoleto = savedLink;
+        }
+        enriched.IsBradescoBoleto = true;
+      }
+
       res.json(enriched);
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao obter fatura do Bom Controle.' });
@@ -585,7 +598,31 @@ async function startServer() {
         };
       });
 
-      res.json(faturas);
+      // Enriquecer com boletos Bradesco salvos localmente
+      const faturasIds = faturas.map((f: any) => f.Id).filter(Boolean);
+      const savedLinks = await db.getBradescoBoletosLinks(faturasIds);
+      
+      const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+      const host = req.get('host');
+
+      const enrichedFaturas = faturas.map((f: any) => {
+        const saved = savedLinks[String(f.Id)];
+        if (saved) {
+          let absoluteLink = saved.link;
+          if (saved.link.startsWith('/')) {
+            absoluteLink = `${protocol}://${host}${saved.link}`;
+          }
+          return {
+            ...f,
+            LinkBoleto: absoluteLink,
+            IsBradescoBoleto: true,
+            NossoNumeroBradesco: saved.nosso_numero || saved.nossonumero
+          };
+        }
+        return f;
+      });
+
+      res.json(enrichedFaturas);
     } catch (e: any) {
       res.status(500).json({ error: e.message || 'Erro ao pesquisar faturas por período no Bom Controle.' });
     }
@@ -1262,6 +1299,29 @@ async function startServer() {
         const finalBarcode = regRes.codBarras10 || regRes.codBarras || (regRes.dados && regRes.dados.codBarras10) || barcode;
         const finalQrCode = regRes.wqrcdPdraoMercd || regRes.semvQrcode || (regRes.dados && (regRes.dados.wqrcdPdraoMercd || regRes.dados.semvQrcode)) || '';
 
+        const queryParamsForLink = new URLSearchParams({
+          valor: String(valor),
+          vencimento: String(vencimento),
+          emissao: String(emissao),
+          nome: pagadorNome,
+          documento: pagadorDoc,
+          endereco: pagadorEnd,
+          cep: pagadorCep,
+          nosso_numero: nossoNumero,
+          agencia: agency,
+          conta: `${account}-${accountDigit}`,
+          carteira: wallet,
+          beneficiario: beneficiario,
+          cnpj_beneficiario: cnpjBeneficiario,
+          qr_code: finalQrCode,
+          linha_digitavel: finalLinhaDigitavel,
+          barcode: finalBarcode
+        });
+        const generatedLink = `/api/integration/bradesco/visualizar-boleto?${queryParamsForLink.toString()}`;
+
+        // Salvar o link do boleto no banco de dados local para persistência futura
+        await db.saveBradescoBoletoLink(faturaId, generatedLink, nossoNumero);
+
         return res.json({
           success: true,
           mocked: false,
@@ -1346,9 +1406,11 @@ async function startServer() {
       }
 
       const agency = settings.bradesco_agency || '0123';
+      const account = settings.bradesco_account || '0123456';
+      const accountDigit = settings.bradesco_account_digit || '7';
       const wallet = settings.bradesco_wallet || '09';
       const cnpjBeneficiario = settings.bradesco_cnpj || companySettings.cnpj || '44.285.891/0001-45';
-      const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '');
+      const beneficiario = settings.bradesco_beneficiario_nome || companySettings.company_name || 'UNITY AUTOMACOES LTDA.';
 
       try {
         console.log(`[Bradesco API mTLS] Iniciando autenticação para consulta. Ambiente: ${env.toUpperCase()}`);
@@ -1400,19 +1462,32 @@ async function startServer() {
           throw new Error('access_token não retornado de Bradesco.');
         }
 
-        // Consultar Status via pesquisarBoleto
+        // Consultar Status via cobranca-consulta-titulo/v1/consultar
         const queryHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-        const queryPath = '/boleto-hibrido/cobranca-registro/v1/pesquisarBoleto';
+        const queryPath = '/boleto-hibrido/cobranca-consulta-titulo/v1/consultar';
 
         const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
+        const cleanAccount = account.split('-')[0].replace(/\D/g, '').padStart(7, '0');
         const cleanWallet = wallet.replace(/\D/g, '').padStart(2, '0');
+        const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '').padStart(14, '0');
+
+        const cpfCnpjUsuario = Number(cleanCnpj.substring(0, 9));
+        const filialCnpjUsuario = Number(cleanCnpj.substring(9, 13));
+        const controleCpfCnpjUsuario = Number(cleanCnpj.substring(13, 15));
 
         const queryPayload = {
-          nuAgencia: Number(cleanAgency) || 123,
-          nuCarteira: Number(cleanWallet) || 9,
-          nuNossoNumero: nossoNumero,
-          cdBeneficiario: cleanCnpj
+          cpfCnpjUsuario: cpfCnpjUsuario,
+          filialCnpjUsuario: filialCnpjUsuario,
+          controleCpfCnpjUsuario: controleCpfCnpjUsuario,
+          idProduto: Number(cleanWallet) || 9,
+          contaProduto: Number(`${cleanAgency}${cleanAccount}`),
+          nomePersonalizado: 'bradesco',
+          nossoNumero: Number(nossoNumero),
+          seqTitulo: 0,
+          status: 0
         };
+
+        console.log(`[Bradesco API mTLS] Efetuando consulta de boleto híbrido para NossoNúmero: ${nossoNumero}`);
 
         const queryRes: any = await new Promise((resolve, reject) => {
           const reqOpts = {
@@ -1449,22 +1524,112 @@ async function startServer() {
 
         console.log('[Bradesco API mTLS] Consulta de boleto com sucesso!', queryRes);
 
-        const cdStatus = queryRes.cdStatusBoleto || (queryRes.dados && queryRes.dados.cdStatusBoleto) || '';
-        const descStatus = queryRes.descStatusBoleto || (queryRes.dados && queryRes.dados.descStatusBoleto) || '';
-        const dataMovimentacao = queryRes.dtLiquidacao || (queryRes.dados && queryRes.dados.dtLiquidacao) || '';
+        const cdStatus = queryRes.codStatus || queryRes.codStatus10 || (queryRes.dados && (queryRes.dados.codStatus || queryRes.dados.codStatus10)) || '';
+        const descStatus = queryRes.status || queryRes.status10 || (queryRes.dados && (queryRes.dados.status || queryRes.dados.status10)) || '';
+        const rawdtLiquidacao = queryRes.dtPagto || queryRes.dataPagamento || (queryRes.dados && (queryRes.dados.dtPagto || queryRes.dados.dataPagamento)) || '';
+        
+        const parseBradescoDate = (dateStr: string): string => {
+          if (!dateStr) return '';
+          const clean = dateStr.replace(/\D/g, '');
+          if (clean.length === 8) {
+            // Se for DDMMAAAA -> AAAA-MM-DD
+            return `${clean.substring(4, 8)}-${clean.substring(2, 4)}-${clean.substring(0, 2)}`;
+          }
+          const parts = dateStr.split('/');
+          if (parts.length === 3) {
+            return `${parts[2]}-${parts[1]}-${parts[0]}`;
+          }
+          return dateStr;
+        };
+
+        const dataMovimentacao = parseBradescoDate(String(rawdtLiquidacao));
 
         let isQuitada = false;
         const upperDesc = String(descStatus).toUpperCase();
-        if (upperDesc.includes('PAGO') || upperDesc.includes('LIQUIDADO') || upperDesc.includes('BAIXA') || cdStatus === '1' || cdStatus === '2') {
+        const strCdStatus = String(cdStatus);
+        
+        // Mapeia os status de liquidação/pagamento oficiais (e.g. 13=PAGO NO DIA, 61=PAGO, etc.)
+        if (
+          upperDesc.includes('PAGO') || 
+          upperDesc.includes('LIQUIDADO') || 
+          upperDesc.includes('BAIXA') || 
+          ['13', '30', '51', '61', '62', '67', '69'].includes(strCdStatus) ||
+          strCdStatus === '13' || strCdStatus === '61' || strCdStatus === '62'
+        ) {
           isQuitada = true;
         }
+
+        // Reconstrução dos dados para o link de visualização do boleto
+        const resVal = queryRes.valMoeda || queryRes.valMoeda10 || (queryRes.dados && (queryRes.dados.valMoeda || queryRes.dados.valMoeda10));
+        const finalValor = resVal ? (Number(resVal) / 100) : Number(fatura.ValorOriginal || fatura.Valor || fatura.valor || 100.00);
+
+        const rawVenc = queryRes.dataVencto || queryRes.dataVencto10 || queryRes.dataVenctoBol10 || (queryRes.dados && (queryRes.dados.dataVencto || queryRes.dados.dataVencto10));
+        const finalVencimento = rawVenc ? parseBradescoDate(String(rawVenc)) : String(fatura.DataVencimento || fatura.Vencimento || '').split('T')[0];
+
+        const rawEmis = queryRes.dataEmis || queryRes.dataEmis10 || (queryRes.dados && (queryRes.dados.dataEmis || queryRes.dados.dataEmis10));
+        const finalEmissao = rawEmis ? parseBradescoDate(String(rawEmis)) : String(fatura.DataEmissao || fatura.Emissao || '').split('T')[0];
+
+        const resNome = queryRes.nomeSacado || queryRes.nomeSacado10 || (queryRes.dados && (queryRes.dados.nomeSacado || queryRes.dados.nomeSacado10));
+        const pagadorNome = resNome ? String(resNome) : (fatura.Cliente?.NomeRazaoSocial || fatura.Cliente?.Nome || 'Cliente Desconhecido');
+
+        const resDoc = queryRes.cnpjSacado || queryRes.cnpjSacado10 || (queryRes.dados && (queryRes.dados.cnpjSacado || queryRes.dados.cnpjSacado10));
+        const pagadorDoc = resDoc ? String(resDoc) : (fatura.Cliente?.CnpjCpf || '000.000.000-00');
+
+        const resEnd = queryRes.endSacado || queryRes.endSacado10 || (queryRes.dados && (queryRes.dados.endSacado || queryRes.dados.endSacado10));
+        let pagadorEnd = '';
+        if (resEnd) {
+          pagadorEnd = String(resEnd);
+        } else if (fatura.Cliente?.Endereco) {
+          if (typeof fatura.Cliente.Endereco === 'object') {
+            const e = fatura.Cliente.Endereco;
+            const logradouro = e.Logradouro || e.Rua || e.Street || '';
+            const numero = e.Numero || '';
+            const bairro = e.Bairro || '';
+            const cidade = e.Cidade || '';
+            const uf = e.Estado || e.Uf || '';
+            pagadorEnd = [logradouro ? (numero ? `${logradouro}, ${numero}` : logradouro) : '', bairro, cidade ? (uf ? `${cidade}-${uf}` : cidade) : ''].filter(Boolean).join(' - ');
+          } else {
+            pagadorEnd = String(fatura.Cliente.Endereco);
+          }
+        }
+
+        const resCep = queryRes.cepSacado || queryRes.cepSacado10 || (queryRes.dados && (queryRes.dados.cepSacado || queryRes.dados.cepSacado10));
+        const pagadorCep = resCep ? String(resCep) : (fatura.Cliente?.Cep || '00000-000');
+
+        const finalQrCode = queryRes.semvQrcode || queryRes.wqrcdPdraoMercd || queryRes.schavePix || (queryRes.dados && (queryRes.dados.semvQrcode || queryRes.dados.wqrcdPdraoMercd || queryRes.dados.schavePix)) || '';
+        const finalLinhaDigitavel = queryRes.linhaDig || queryRes.linhaDig10 || queryRes.linhaDigitavel || (queryRes.dados && (queryRes.dados.linhaDig || queryRes.dados.linhaDig10 || queryRes.dados.linhaDigitavel)) || '';
+        const finalBarcode = queryRes.codBarras || queryRes.codBarras10 || queryRes.barcode || (queryRes.dados && (queryRes.dados.codBarras || queryRes.dados.codBarras10 || queryRes.dados.barcode)) || '';
+
+        const queryParams = new URLSearchParams({
+          valor: String(finalValor),
+          vencimento: finalVencimento,
+          emissao: finalEmissao,
+          nome: pagadorNome,
+          documento: pagadorDoc,
+          endereco: pagadorEnd,
+          cep: pagadorCep,
+          nosso_numero: nossoNumero,
+          agencia: agency,
+          conta: `${account}-${accountDigit}`,
+          carteira: wallet,
+          beneficiario: beneficiario,
+          cnpj_beneficiario: cnpjBeneficiario,
+          qr_code: finalQrCode,
+          linha_digitavel: finalLinhaDigitavel,
+          barcode: finalBarcode
+        });
+        const bradescoLink = `/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
+
+        // Salvar no banco de dados local para que o link fique persistido e seja resgatado no futuro
+        await db.saveBradescoBoletoLink(faturaId, bradescoLink, nossoNumero);
 
         res.json({
           success: true,
           quitado: isQuitada,
           status: descStatus || cdStatus || 'REGISTRADO',
           dataMovimentacao,
-          raw: queryRes
+          raw: queryRes,
+          linkBoleto: bradescoLink
         });
 
       } catch (apiError: any) {

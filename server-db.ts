@@ -23,6 +23,7 @@ interface DatabaseSchema {
   companies?: (CompanySettings & { id: number })[];
   products?: Product[];
   integration_settings?: IntegrationSettings;
+  bradesco_boletos_links?: { fatura_id: string; link_boleto: string; nosso_numero?: string; created_at?: string }[];
 }
 
 // Configurações padrão corporativas
@@ -270,6 +271,22 @@ class Database {
       } catch (err) {
         console.error('[Database Migration] Erro ao criar ou inicializar "integration_settings":', err);
       }
+
+      // Cria a tabela de links de boletos Bradesco se não existir
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS bradesco_boletos_links (
+            fatura_id VARCHAR(50) PRIMARY KEY,
+            link_boleto TEXT NOT NULL,
+            nosso_numero VARCHAR(50) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        `);
+        console.log('[Database Migration] Tabela "bradesco_boletos_links" criada ou validada com sucesso.');
+      } catch (err) {
+        console.error('[Database Migration] Erro ao criar "bradesco_boletos_links":', err);
+      }
+
     } catch (e) {
       console.error('[Database Migration] Erro inesperado ao migrar tabela:', e);
     }
@@ -1921,6 +1938,81 @@ class Database {
       statusDistribution,
       recentActivity
     };
+  }
+
+  // --- BOLETOS BRADESCO LINKS PERSISTENCE ---
+
+  async saveBradescoBoletoLink(faturaId: string | number, link: string, nossoNumero?: string): Promise<void> {
+    const fId = String(faturaId);
+    if (!pool) {
+      if (!this.schema.bradesco_boletos_links) {
+        this.schema.bradesco_boletos_links = [];
+      }
+      const existingIdx = this.schema.bradesco_boletos_links.findIndex(item => item.fatura_id === fId);
+      const record = { fatura_id: fId, link_boleto: link, nosso_numero: nossoNumero, created_at: new Date().toISOString() };
+      if (existingIdx >= 0) {
+        this.schema.bradesco_boletos_links[existingIdx] = record;
+      } else {
+        this.schema.bradesco_boletos_links.push(record);
+      }
+      this.saveJSON();
+      return;
+    }
+    try {
+      await pool.query(`
+        INSERT INTO bradesco_boletos_links (fatura_id, link_boleto, nosso_numero)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE link_boleto = VALUES(link_boleto), nosso_numero = VALUES(nosso_numero)
+      `, [fId, link, nossoNumero || null]);
+    } catch (err) {
+      console.error('[Database] Erro ao salvar link do boleto Bradesco:', err);
+    }
+  }
+
+  async getBradescoBoletoLink(faturaId: string | number): Promise<string | null> {
+    const fId = String(faturaId);
+    if (!pool) {
+      if (!this.schema.bradesco_boletos_links) return null;
+      const found = this.schema.bradesco_boletos_links.find(item => item.fatura_id === fId);
+      return found ? found.link_boleto : null;
+    }
+    try {
+      const [rows]: any = await pool.query('SELECT link_boleto FROM bradesco_boletos_links WHERE fatura_id = ?', [fId]);
+      if (rows.length > 0) {
+        return rows[0].link_boleto;
+      }
+      return null;
+    } catch (err) {
+      console.error('[Database] Erro ao carregar link do boleto Bradesco:', err);
+      return null;
+    }
+  }
+
+  async getBradescoBoletosLinks(faturaIds: (string | number)[]): Promise<Record<string, { link: string; nossonumero?: string; nosso_numero?: string }>> {
+    const result: Record<string, { link: string; nossonumero?: string; his_nosso_numero?: string; nosso_numero?: string }> = {};
+    if (faturaIds.length === 0) return result;
+    const stringIds = faturaIds.map(id => String(id));
+
+    if (!pool) {
+      if (!this.schema.bradesco_boletos_links) return result;
+      for (const item of this.schema.bradesco_boletos_links) {
+        if (stringIds.includes(item.fatura_id)) {
+          result[item.fatura_id] = { link: item.link_boleto, nossonumero: item.nosso_numero, nosso_numero: item.nosso_numero };
+        }
+      }
+      return result;
+    }
+
+    try {
+      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero FROM bradesco_boletos_links WHERE fatura_id IN (?)', [stringIds]);
+      for (const row of rows) {
+        result[row.fatura_id] = { link: row.link_boleto, nossonumero: row.nosso_numero, nosso_numero: row.nosso_numero };
+      }
+      return result;
+    } catch (err) {
+      console.error('[Database] Erro ao carregar links em lote de boletos Bradesco:', err);
+      return result;
+    }
   }
 }
 

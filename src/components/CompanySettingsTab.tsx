@@ -680,8 +680,16 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
         }));
 
         // Se a fatura consultada for a fatura selecionada ativamente, atualiza as flags de quitado se mudou
-        if (fetchedFatura && String(fetchedFatura.Id) === faturaId && data.quitado !== fetchedFatura.Quitada) {
-          setFetchedFatura((prev: any) => prev ? { ...prev, Quitada: data.quitado } : null);
+        if (fetchedFatura && String(fetchedFatura.Id) === faturaId) {
+          setFetchedFatura((prev: any) => {
+            if (!prev) return null;
+            const updated = { ...prev, Quitada: data.quitado };
+            if (data.linkBoleto) {
+              updated.LinkBoleto = data.linkBoleto;
+              updated.IsBradescoBoleto = true;
+            }
+            return updated;
+          });
         }
 
         // Atualiza na lista de faturasList se aplicável para refletir visualmente o status atualizado
@@ -689,7 +697,12 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           if (!prevList) return null;
           return prevList.map((f: any) => {
             if (String(f.Id) === faturaId) {
-              return { ...f, Quitada: data.quitado };
+              const updated = { ...f, Quitada: data.quitado };
+              if (data.linkBoleto) {
+                updated.LinkBoleto = data.linkBoleto;
+                updated.IsBradescoBoleto = true;
+              }
+              return updated;
             }
             return f;
           });
@@ -2244,16 +2257,29 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                         PDF
                                       </a>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleConsultarStatusBradesco(f)}
-                                      disabled={checkingStatusId === String(f.Id)}
-                                      className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
-                                      title="Consultar status de pagamento no Bradesco"
-                                    >
-                                      <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                      {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
-                                    </button>
+                                    {f.LinkBoleto ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConsultarStatusBradesco(f)}
+                                        disabled={checkingStatusId === String(f.Id)}
+                                        className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
+                                        title="Consultar status de pagamento no Bradesco"
+                                      >
+                                        <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                        {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConsultarStatusBradesco(f)}
+                                        disabled={checkingStatusId === String(f.Id)}
+                                        className="text-amber-600 hover:text-amber-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
+                                        title="Buscar e carregar o boleto já registrado no Bradesco"
+                                      >
+                                        <Search className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                        {checkingStatusId === String(f.Id) ? 'Buscando...' : 'Buscar Boleto'}
+                                      </button>
+                                    )}
                                     {statusCheckResults[String(f.Id)] && (
                                       <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
                                         statusCheckResults[String(f.Id)].quitado 
@@ -2659,10 +2685,19 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             onClick={() => handleConsultarStatusBradesco(fetchedFatura)}
                             disabled={checkingStatusId === String(fetchedFatura.Id)}
                             className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0"
-                            title="Consultar status deste boleto na API Bradesco"
+                            title="Consultar status ou buscar boleto registrado na API Bradesco"
                           >
-                            <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
-                            {checkingStatusId === String(fetchedFatura.Id) ? 'Verificando...' : 'Consultar Status'}
+                            {fetchedFatura.LinkBoleto ? (
+                              <>
+                                <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                                {checkingStatusId === String(fetchedFatura.Id) ? 'Verificando...' : 'Consultar Status'}
+                              </>
+                            ) : (
+                              <>
+                                <Search className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                                {checkingStatusId === String(fetchedFatura.Id) ? 'Buscando...' : 'Buscar Boleto Gerado'}
+                              </>
+                            )}
                           </button>
                           
                           <select
