@@ -792,7 +792,12 @@ async function startServer() {
               const pathAndQuery = pdfUrl.substring(idx);
               externalUrl = `${protocol}://${host}${pathAndQuery}`;
             }
-            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&pdf.margin.top=0.4cm&pdf.margin.bottom=0.4cm&pdf.margin.left=0.4cm&pdf.margin.right=0.4cm`;
+            if (externalUrl.includes('?')) {
+              externalUrl += '&pdf=true';
+            } else {
+              externalUrl += '?pdf=true';
+            }
+            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&viewport.width=794&viewport.height=1122&pdf.margin.top=0&pdf.margin.bottom=0&pdf.margin.left=0&pdf.margin.right=0`;
             console.log(`[Whaticket Proxy] Convertendo boleto Bradesco HTML para PDF via Microlink: ${downloadUrl}`);
           } else {
             console.log(`[Whaticket Proxy] Buscando PDF do boleto em: ${pdfUrl}`);
@@ -1740,7 +1745,12 @@ async function startServer() {
               const pathAndQuery = pdfUrl.substring(idx);
               externalUrl = `${protocol}://${host}${pathAndQuery}`;
             }
-            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&pdf.margin.top=0.4cm&pdf.margin.bottom=0.4cm&pdf.margin.left=0.4cm&pdf.margin.right=0.4cm`;
+            if (externalUrl.includes('?')) {
+              externalUrl += '&pdf=true';
+            } else {
+              externalUrl += '?pdf=true';
+            }
+            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&viewport.width=794&viewport.height=1122&pdf.margin.top=0&pdf.margin.bottom=0&pdf.margin.left=0&pdf.margin.right=0`;
             console.log(`[Email SMTP] Convertendo boleto Bradesco HTML para PDF via Microlink: ${downloadUrl}`);
           } else {
             console.log(`[Email SMTP] Baixando anexo a partir de: ${pdfUrl}`);
@@ -1889,6 +1899,8 @@ async function startServer() {
       const vencBr = formatDateBr(vVenc);
       const emisBr = formatDateBr(vEmis);
 
+      const isPdfMode = req.query.pdf === 'true';
+
       // Renderiza template HTML de Alta Fidelidade do Boleto Bradesco
       const html = `
       <!DOCTYPE html>
@@ -1916,6 +1928,24 @@ async function startServer() {
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
             box-sizing: border-box;
           }
+          ${isPdfMode ? `
+          body {
+            background-color: white !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .boleto-container {
+            box-shadow: none !important;
+            padding: 10mm !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          ` : ''}
           .boleto-table td {
             border: 1px solid #000;
             padding: 3px 6px;
