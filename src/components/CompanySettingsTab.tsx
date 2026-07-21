@@ -4,7 +4,7 @@ import {
   Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
   HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
   Search, FileText, Send, Key, Mail, RefreshCw, AlertCircle, ExternalLink, 
-  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard, Info, XCircle
+  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard
 } from 'lucide-react';
 
 interface CompanySettingsTabProps {
@@ -56,7 +56,6 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bradescoError, setBradescoError] = useState<string | null>(null);
   const [bradescoEnvSelection, setBradescoEnvSelection] = useState<'sandbox' | 'production'>('sandbox');
   const [checkingStatusId, setCheckingStatusId] = useState<string | null>(null);
-  const [cancellingBoletoId, setCancellingBoletoId] = useState<string | null>(null);
   const [statusCheckResults, setStatusCheckResults] = useState<Record<string, { quitado: boolean; status: string; dataMovimentacao?: string; message?: string }>>({});
 
   // Estados para edição manual dos dados do Sacado (Payer)
@@ -626,8 +625,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           `&cnpj_beneficiario=${encodeURIComponent(boleto.cnpjBeneficiario)}` +
           `&qr_code=${encodeURIComponent(boleto.qrCode || '')}` +
           `&linha_digitavel=${encodeURIComponent(boleto.linhaDigitavel || '')}` +
-          `&barcode=${encodeURIComponent(boleto.barcodeValue || '')}` +
-          `&instrucoes=${encodeURIComponent(integrationSettings.bradesco_instrucoes || '')}`;
+          `&barcode=${encodeURIComponent(boleto.barcodeValue || '')}`;
 
         let msg = integrationSettings.whaticket_default_message || 'Olá! Segue o seu boleto do Bradesco no valor de {valor} com vencimento em {vencimento}.\nLink do boleto: {link_boleto}';
         const valorStr = `R$ ${Number(boleto.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -716,74 +714,6 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
       alert(`Falha na consulta Bradesco: ${err.message}`);
     } finally {
       setCheckingStatusId(null);
-    }
-  };
-
-  const handleBaixarBoletoBradesco = async (fatura: any) => {
-    if (!fatura) return;
-    const faturaId = String(fatura.Id || fatura.id);
-    const nossoNumero = fatura.NossoNumeroBradesco || `09${String(faturaId).padStart(9, '0')}`;
-    
-    if (!window.confirm(`Deseja realmente baixar/cancelar este boleto no Bradesco? Esta ação registrará o boleto como baixado/cancelado.`)) {
-      return;
-    }
-
-    try {
-      setCancellingBoletoId(faturaId);
-      const res = await fetch('/api/integration/bradesco/baixar-boleto', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          faturaId,
-          nossoNumero
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Erro ${res.status} ao baixar boleto.`);
-      }
-
-      const data = await res.json();
-      if (data.success) {
-        alert('Boleto baixado/cancelado com sucesso!');
-        
-        // Atualiza status local
-        setStatusCheckResults(prev => ({
-          ...prev,
-          [faturaId]: {
-            quitado: true,
-            status: 'BAIXADO',
-            message: 'Boleto baixado/cancelado com sucesso.'
-          }
-        }));
-
-        // Se a fatura ativa for essa, atualiza
-        if (fetchedFatura && String(fetchedFatura.Id) === faturaId) {
-          setFetchedFatura((prev: any) => {
-            if (!prev) return null;
-            return { ...prev, Quitada: true, ApiQuitado: true, ApiStatus: 'BAIXADO' };
-          });
-        }
-
-        // Atualiza na lista geral de faturas
-        setFaturasList((prevList) => {
-          if (!prevList) return null;
-          return prevList.map((f: any) => {
-            if (String(f.Id) === faturaId) {
-              return { ...f, Quitada: true, ApiQuitado: true, ApiStatus: 'BAIXADO' };
-            }
-            return f;
-          });
-        });
-
-      } else {
-        throw new Error(data.error || 'Erro ao processar baixa do boleto.');
-      }
-    } catch (err: any) {
-      alert(`Falha ao baixar boleto Bradesco: ${err.message}`);
-    } finally {
-      setCancellingBoletoId(null);
     }
   };
 
@@ -1019,8 +949,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
             conta: `${integrationSettings.bradesco_account || '0123456'}-${integrationSettings.bradesco_account_digit || '7'}`,
             carteira: integrationSettings.bradesco_wallet || '09',
             beneficiario: integrationSettings.bradesco_beneficiario_nome || 'UNITY AUTOMACOES LTDA.',
-            cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45',
-            instrucoes: integrationSettings.bradesco_instrucoes || ''
+            cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45'
           });
           linkBoleto = `${window.location.origin}/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
         }
@@ -1148,8 +1077,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
               conta: `${integrationSettings.bradesco_account || '0123456'}-${integrationSettings.bradesco_account_digit || '7'}`,
               carteira: integrationSettings.bradesco_wallet || '09',
               beneficiario: integrationSettings.bradesco_beneficiario_nome || 'UNITY AUTOMACOES LTDA.',
-              cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45',
-              instrucoes: integrationSettings.bradesco_instrucoes || ''
+              cnpj_beneficiario: integrationSettings.bradesco_cnpj || '44.285.891/0001-45'
             });
             const generatedLink = `${window.location.origin}/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
             
@@ -1864,136 +1792,6 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                   />
                 </div>
 
-                {/* Regras de Multa, Juros e Desconto de acordo com o manual Bradesco */}
-                <div className="border-t border-gray-100 pt-4 space-y-3">
-                  <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <CreditCard className="h-4 w-4 text-indigo-500" />
-                    Regras de Multa, Juros e Desconto
-                  </h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50/50 p-3.5 rounded-lg border border-gray-200/80">
-                    {/* Linha 1: Multa e Juros */}
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Multa</label>
-                      <div className="flex gap-2">
-                        <select
-                          value={integrationSettings.bradesco_multa_tipo || 'isento'}
-                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_multa_tipo: e.target.value as any })}
-                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="isento">Isento</option>
-                          <option value="percentual">Percentual</option>
-                          <option value="valor">Valor</option>
-                        </select>
-                        <div className="relative flex-1">
-                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
-                            {integrationSettings.bradesco_multa_tipo === 'valor' ? 'R$' : '%'}
-                          </span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            disabled={integrationSettings.bradesco_multa_tipo === 'isento'}
-                            value={integrationSettings.bradesco_multa_valor !== undefined ? integrationSettings.bradesco_multa_valor : 0}
-                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_multa_valor: parseFloat(e.target.value) || 0 })}
-                            placeholder="0,00"
-                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Percentual juros</label>
-                      <div className="flex gap-2">
-                        <select
-                          value={integrationSettings.bradesco_juros_tipo || 'isento'}
-                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_juros_tipo: e.target.value as any })}
-                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="isento">Isento</option>
-                          <option value="diario">Diário</option>
-                          <option value="mensal">Mensal</option>
-                        </select>
-                        <div className="relative flex-1">
-                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
-                            %
-                          </span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            disabled={integrationSettings.bradesco_juros_tipo === 'isento'}
-                            value={integrationSettings.bradesco_juros_valor !== undefined ? integrationSettings.bradesco_juros_valor : 0}
-                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_juros_valor: parseFloat(e.target.value) || 0 })}
-                            placeholder="0,00"
-                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Linha 2: Desconto e Dias de Antecedência */}
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Desconto até o vencimento</label>
-                      <div className="flex gap-2">
-                        <select
-                          value={integrationSettings.bradesco_desconto_tipo || 'isento'}
-                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_tipo: e.target.value as any })}
-                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="isento">Isento</option>
-                          <option value="percentual">Percentual</option>
-                          <option value="valor">Valor</option>
-                        </select>
-                        <div className="relative flex-1">
-                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
-                            {integrationSettings.bradesco_desconto_tipo === 'valor' ? 'R$' : '%'}
-                          </span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            disabled={integrationSettings.bradesco_desconto_tipo === 'isento'}
-                            value={integrationSettings.bradesco_desconto_valor !== undefined ? integrationSettings.bradesco_desconto_valor : 0}
-                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_valor: parseFloat(e.target.value) || 0 })}
-                            placeholder="0,00"
-                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
-                        Dias antecedência para desconto
-                        <Info className="h-3 w-3 text-gray-400" title="Quantidade de dias antes do vencimento para aplicar o desconto" />
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        disabled={integrationSettings.bradesco_desconto_tipo === 'isento'}
-                        value={integrationSettings.bradesco_desconto_dias !== undefined ? integrationSettings.bradesco_desconto_dias : 0}
-                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_dias: parseInt(e.target.value) || 0 })}
-                        placeholder="0"
-                        className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
-                      />
-                    </div>
-
-                    {/* Instruções do Boleto */}
-                    <div className="space-y-1 md:col-span-2">
-                      <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
-                        Instruções do Boleto
-                        <Info className="h-3 w-3 text-gray-400" title="Instruções impressas no boleto. Escreva uma por linha." />
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={integrationSettings.bradesco_instrucoes !== undefined ? integrationSettings.bradesco_instrucoes : ''}
-                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_instrucoes: e.target.value })}
-                        placeholder="• NÃO RECEBER APÓS O VENCIMENTO.&#10;• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO."
-                        className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
                 {/* mTLS Certificates content */}
                 <div className="space-y-2">
                   <div className="space-y-1">
@@ -2460,34 +2258,22 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                       </a>
                                     )}
                                     {f.LinkBoleto ? (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleConsultarStatusBradesco(f)}
-                                          disabled={checkingStatusId === String(f.Id)}
-                                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                          title="Consultar status de pagamento no Bradesco"
-                                        >
-                                          <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                          {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleBaixarBoletoBradesco(f)}
-                                          disabled={cancellingBoletoId === String(f.Id)}
-                                          className="text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                          title="Baixar/Cancelar o boleto no Bradesco se pago por transferência ou outro meio"
-                                        >
-                                          <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(f.Id) ? 'animate-pulse' : ''}`} />
-                                          {cancellingBoletoId === String(f.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
-                                        </button>
-                                      </>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleConsultarStatusBradesco(f)}
+                                        disabled={checkingStatusId === String(f.Id)}
+                                        className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
+                                        title="Consultar status de pagamento no Bradesco"
+                                      >
+                                        <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                        {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
+                                      </button>
                                     ) : (
                                       <button
                                         type="button"
                                         onClick={() => handleConsultarStatusBradesco(f)}
                                         disabled={checkingStatusId === String(f.Id)}
-                                        className="text-amber-600 hover:text-amber-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
+                                        className="text-amber-600 hover:text-amber-800 font-bold flex items-center gap-0.5 hover:underline ml-1"
                                         title="Buscar e carregar o boleto já registrado no Bradesco"
                                       >
                                         <Search className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
@@ -2931,19 +2717,6 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                               </>
                             )}
                           </button>
-
-                          {fetchedFatura.LinkBoleto && (
-                            <button
-                              type="button"
-                              onClick={() => handleBaixarBoletoBradesco(fetchedFatura)}
-                              disabled={cancellingBoletoId === String(fetchedFatura.Id)}
-                              className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0"
-                              title="Baixar/Cancelar o boleto no Bradesco"
-                            >
-                              <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(fetchedFatura.Id) ? 'animate-pulse' : ''}`} />
-                              {cancellingBoletoId === String(fetchedFatura.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
-                            </button>
-                          )}
                           
                           <select
                             value={bradescoEnvSelection}
@@ -3138,8 +2911,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                   `&cnpj_beneficiario=${encodeURIComponent(b.cnpjBeneficiario)}` +
                                   `&qr_code=${encodeURIComponent(b.qrCode || '')}` +
                                   `&linha_digitavel=${encodeURIComponent(b.linhaDigitavel || '')}` +
-                                  `&barcode=${encodeURIComponent(b.barcodeValue || '')}` +
-                                  `&instrucoes=${encodeURIComponent(integrationSettings.bradesco_instrucoes || '')}`;
+                                  `&barcode=${encodeURIComponent(b.barcodeValue || '')}`;
                                 window.open(url, '_blank');
                               }}
                               className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"

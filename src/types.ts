@@ -121,14 +121,6 @@ export interface IntegrationSettings {
   bradesco_cnpj?: string;
   bradesco_beneficiario_nome?: string;
   bradesco_passphrase?: string;
-  bradesco_multa_tipo?: 'isento' | 'percentual' | 'valor';
-  bradesco_multa_valor?: number;
-  bradesco_juros_tipo?: 'isento' | 'diario' | 'mensal';
-  bradesco_juros_valor?: number;
-  bradesco_desconto_tipo?: 'isento' | 'percentual' | 'valor';
-  bradesco_desconto_valor?: number;
-  bradesco_desconto_dias?: number;
-  bradesco_instrucoes?: string;
 
   // Email SMTP
   email_smtp_host?: string;

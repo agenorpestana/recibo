@@ -59,14 +59,6 @@ const defaultIntegrationSettings: IntegrationSettings = {
   bradesco_cnpj: '',
   bradesco_beneficiario_nome: '',
   bradesco_passphrase: '',
-  bradesco_multa_tipo: 'isento',
-  bradesco_multa_valor: 0,
-  bradesco_juros_tipo: 'isento',
-  bradesco_juros_valor: 0,
-  bradesco_desconto_tipo: 'isento',
-  bradesco_desconto_valor: 0,
-  bradesco_desconto_dias: 0,
-  bradesco_instrucoes: '• NÃO RECEBER APÓS O VENCIMENTO.\n• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO.\n• PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA OU PELO SEU INTERNET BANKING.',
   email_smtp_host: 'smtp.gmail.com',
   email_smtp_port: 465,
   email_smtp_user: '',
@@ -260,14 +252,6 @@ class Database {
           { name: 'bradesco_cnpj', type: 'VARCHAR(25) DEFAULT NULL' },
           { name: 'bradesco_beneficiario_nome', type: 'VARCHAR(255) DEFAULT NULL' },
           { name: 'bradesco_passphrase', type: 'VARCHAR(255) DEFAULT NULL' },
-          { name: 'bradesco_multa_tipo', type: "VARCHAR(20) NOT NULL DEFAULT 'isento'" },
-          { name: 'bradesco_multa_valor', type: 'DECIMAL(10,2) NOT NULL DEFAULT 0.00' },
-          { name: 'bradesco_juros_tipo', type: "VARCHAR(20) NOT NULL DEFAULT 'isento'" },
-          { name: 'bradesco_juros_valor', type: 'DECIMAL(10,2) NOT NULL DEFAULT 0.00' },
-          { name: 'bradesco_desconto_tipo', type: "VARCHAR(20) NOT NULL DEFAULT 'isento'" },
-          { name: 'bradesco_desconto_valor', type: 'DECIMAL(10,2) NOT NULL DEFAULT 0.00' },
-          { name: 'bradesco_desconto_dias', type: 'INT NOT NULL DEFAULT 0' },
-          { name: 'bradesco_instrucoes', type: 'TEXT DEFAULT NULL' },
           { name: 'email_smtp_host', type: 'VARCHAR(255) DEFAULT NULL' },
           { name: 'email_smtp_port', type: 'INT DEFAULT 465' },
           { name: 'email_smtp_user', type: 'VARCHAR(255) DEFAULT NULL' },
@@ -497,14 +481,6 @@ class Database {
         bradesco_cnpj: rows[0].bradesco_cnpj || '',
         bradesco_beneficiario_nome: rows[0].bradesco_beneficiario_nome || '',
         bradesco_passphrase: rows[0].bradesco_passphrase || '',
-        bradesco_multa_tipo: rows[0].bradesco_multa_tipo || 'isento',
-        bradesco_multa_valor: rows[0].bradesco_multa_valor !== null && rows[0].bradesco_multa_valor !== undefined ? Number(rows[0].bradesco_multa_valor) : 0,
-        bradesco_juros_tipo: rows[0].bradesco_juros_tipo || 'isento',
-        bradesco_juros_valor: rows[0].bradesco_juros_valor !== null && rows[0].bradesco_juros_valor !== undefined ? Number(rows[0].bradesco_juros_valor) : 0,
-        bradesco_desconto_tipo: rows[0].bradesco_desconto_tipo || 'isento',
-        bradesco_desconto_valor: rows[0].bradesco_desconto_valor !== null && rows[0].bradesco_desconto_valor !== undefined ? Number(rows[0].bradesco_desconto_valor) : 0,
-        bradesco_desconto_dias: rows[0].bradesco_desconto_dias !== null && rows[0].bradesco_desconto_dias !== undefined ? Number(rows[0].bradesco_desconto_dias) : 0,
-        bradesco_instrucoes: rows[0].bradesco_instrucoes !== null && rows[0].bradesco_instrucoes !== undefined ? String(rows[0].bradesco_instrucoes) : '• NÃO RECEBER APÓS O VENCIMENTO.\n• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO.\n• PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA OU PELO SEU INTERNET BANKING.',
         email_smtp_host: rows[0].email_smtp_host || 'smtp.gmail.com',
         email_smtp_port: rows[0].email_smtp_port !== null && rows[0].email_smtp_port !== undefined ? Number(rows[0].email_smtp_port) : 465,
         email_smtp_user: rows[0].email_smtp_user || '',
@@ -530,7 +506,7 @@ class Database {
       const [rows]: any = await pool.query('SELECT id FROM integration_settings LIMIT 1');
       if (rows.length === 0) {
         await pool.query(
-          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id, bradesco_env, bradesco_client_id, bradesco_client_secret, bradesco_cert, bradesco_key, bradesco_agency, bradesco_account, bradesco_account_digit, bradesco_wallet, bradesco_cnpj, bradesco_beneficiario_nome, bradesco_passphrase, bradesco_multa_tipo, bradesco_multa_valor, bradesco_juros_tipo, bradesco_juros_valor, bradesco_desconto_tipo, bradesco_desconto_valor, bradesco_desconto_dias, bradesco_instrucoes, email_smtp_host, email_smtp_port, email_smtp_user, email_smtp_pass, email_smtp_secure, email_from_name, email_default_subject, email_default_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO integration_settings (bom_controle_api_key, whaticket_api_token, whaticket_api_url, whaticket_default_message, auto_send_enabled, auto_send_day, auto_send_company_id, bradesco_env, bradesco_client_id, bradesco_client_secret, bradesco_cert, bradesco_key, bradesco_agency, bradesco_account, bradesco_account_digit, bradesco_wallet, bradesco_cnpj, bradesco_beneficiario_nome, bradesco_passphrase, email_smtp_host, email_smtp_port, email_smtp_user, email_smtp_pass, email_smtp_secure, email_from_name, email_default_subject, email_default_body) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             settings.bom_controle_api_key || '',
             settings.whaticket_api_token || '',
@@ -551,14 +527,6 @@ class Database {
             settings.bradesco_cnpj || '',
             settings.bradesco_beneficiario_nome || '',
             settings.bradesco_passphrase || '',
-            settings.bradesco_multa_tipo || 'isento',
-            settings.bradesco_multa_valor || 0,
-            settings.bradesco_juros_tipo || 'isento',
-            settings.bradesco_juros_valor || 0,
-            settings.bradesco_desconto_tipo || 'isento',
-            settings.bradesco_desconto_valor || 0,
-            settings.bradesco_desconto_dias || 0,
-            settings.bradesco_instrucoes || '',
             settings.email_smtp_host || 'smtp.gmail.com',
             settings.email_smtp_port || 465,
             settings.email_smtp_user || '',
@@ -571,7 +539,7 @@ class Database {
         );
       } else {
         await pool.query(
-          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=?, bradesco_env=?, bradesco_client_id=?, bradesco_client_secret=?, bradesco_cert=?, bradesco_key=?, bradesco_agency=?, bradesco_account=?, bradesco_account_digit=?, bradesco_wallet=?, bradesco_cnpj=?, bradesco_beneficiario_nome=?, bradesco_passphrase=?, bradesco_multa_tipo=?, bradesco_multa_valor=?, bradesco_juros_tipo=?, bradesco_juros_valor=?, bradesco_desconto_tipo=?, bradesco_desconto_valor=?, bradesco_desconto_dias=?, bradesco_instrucoes=?, email_smtp_host=?, email_smtp_port=?, email_smtp_user=?, email_smtp_pass=?, email_smtp_secure=?, email_from_name=?, email_default_subject=?, email_default_body=? WHERE id=?',
+          'UPDATE integration_settings SET bom_controle_api_key=?, whaticket_api_token=?, whaticket_api_url=?, whaticket_default_message=?, auto_send_enabled=?, auto_send_day=?, auto_send_company_id=?, bradesco_env=?, bradesco_client_id=?, bradesco_client_secret=?, bradesco_cert=?, bradesco_key=?, bradesco_agency=?, bradesco_account=?, bradesco_account_digit=?, bradesco_wallet=?, bradesco_cnpj=?, bradesco_beneficiario_nome=?, bradesco_passphrase=?, email_smtp_host=?, email_smtp_port=?, email_smtp_user=?, email_smtp_pass=?, email_smtp_secure=?, email_from_name=?, email_default_subject=?, email_default_body=? WHERE id=?',
           [
             settings.bom_controle_api_key || '',
             settings.whaticket_api_token || '',
@@ -592,14 +560,6 @@ class Database {
             settings.bradesco_cnpj || '',
             settings.bradesco_beneficiario_nome || '',
             settings.bradesco_passphrase || '',
-            settings.bradesco_multa_tipo || 'isento',
-            settings.bradesco_multa_valor || 0,
-            settings.bradesco_juros_tipo || 'isento',
-            settings.bradesco_juros_valor || 0,
-            settings.bradesco_desconto_tipo || 'isento',
-            settings.bradesco_desconto_valor || 0,
-            settings.bradesco_desconto_dias || 0,
-            settings.bradesco_instrucoes || '',
             settings.email_smtp_host || 'smtp.gmail.com',
             settings.email_smtp_port || 465,
             settings.email_smtp_user || '',
@@ -2115,7 +2075,7 @@ class Database {
     }
 
     try {
-      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [[stringIds]]);
+      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [stringIds]);
       for (const row of rows) {
         result[row.fatura_id] = {
           link: row.link_boleto,

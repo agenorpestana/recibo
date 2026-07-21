@@ -1201,48 +1201,6 @@ async function startServer() {
         const numMatch = pagadorEnd.match(/\d+/);
         const enroLogdrSacdo = numMatch ? numMatch[0].substring(0, 10) : 'S/N';
 
-        // Cálculo de Juros, Multa e Desconto de acordo com as configurações da integração
-        let ptxJuroVcto = 0;
-        let vdiaJuroMora = 0;
-        let qdiaInicJuro = 0;
-
-        if (settings.bradesco_juros_tipo === 'mensal') {
-          ptxJuroVcto = Math.round((settings.bradesco_juros_valor || 0) * 100000);
-          qdiaInicJuro = 1;
-        } else if (settings.bradesco_juros_tipo === 'diario') {
-          vdiaJuroMora = Math.round(valor * ((settings.bradesco_juros_valor || 0) / 100) * 100);
-          qdiaInicJuro = 1;
-        }
-
-        let pmultaAplicVcto = 0;
-        let vmultaAtrsoPgto = 0;
-        let qdiaInicMulta = 0;
-
-        if (settings.bradesco_multa_tipo === 'percentual') {
-          pmultaAplicVcto = Math.round((settings.bradesco_multa_valor || 0) * 100000);
-          qdiaInicMulta = 1;
-        } else if (settings.bradesco_multa_tipo === 'valor') {
-          vmultaAtrsoPgto = Math.round((settings.bradesco_multa_valor || 0) * 100);
-          qdiaInicMulta = 1;
-        }
-
-        let pdescBonifPgto01 = 0;
-        let vdescBonifPgto01 = 0;
-        let dlimDescBonif1 = "";
-
-        if (settings.bradesco_desconto_tipo && settings.bradesco_desconto_tipo !== 'isento') {
-          const discountDays = settings.bradesco_desconto_dias || 0;
-          const dueDate = new Date(vencimento + 'T12:00:00');
-          dueDate.setDate(dueDate.getDate() - discountDays);
-          dlimDescBonif1 = dueDate.toISOString().split('T')[0].split('-').reverse().join('.');
-
-          if (settings.bradesco_desconto_tipo === 'percentual') {
-            pdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100000);
-          } else if (settings.bradesco_desconto_tipo === 'valor') {
-            vdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100);
-          }
-        }
-
         const registerPayload = {
           ctitloCobrCdent: Number(nossoNumero.replace(/\D/g, '')) || 0,
           registrarTitulo: 1,
@@ -1281,17 +1239,17 @@ async function startServer() {
           qtdDecurPrz: "0",
           codNegativacao: "0",
           diasNegativacao: "0",
-          ptxJuroVcto: ptxJuroVcto,
+          ptxJuroVcto: 0,
           filler1: "",
-          vdiaJuroMora: vdiaJuroMora,
-          pmultaAplicVcto: pmultaAplicVcto,
-          qdiaInicJuro: qdiaInicJuro,
-          vmultaAtrsoPgto: vmultaAtrsoPgto,
-          pdescBonifPgto01: pdescBonifPgto01,
-          qdiaInicMulta: qdiaInicMulta,
-          vdescBonifPgto01: vdescBonifPgto01,
+          vdiaJuroMora: 0,
+          pmultaAplicVcto: 0,
+          qdiaInicJuro: 0,
+          vmultaAtrsoPgto: 0,
+          pdescBonifPgto01: 0,
+          qdiaInicMulta: 0,
+          vdescBonifPgto01: 0,
           pdescBonifPgto02: 0,
-          dlimDescBonif1: dlimDescBonif1,
+          dlimDescBonif1: "",
           vdescBonifPgto02: 0,
           pdescBonifPgto03: 0,
           dlimDescBonif2: "",
@@ -1757,182 +1715,6 @@ async function startServer() {
     }
   });
 
-  // POST: Cancelar/Baixar Boleto Bradesco via API mTLS
-  app.post('/api/integration/bradesco/baixar-boleto', async (req, res) => {
-    try {
-      const { faturaId, nossoNumero } = req.body;
-      if (!faturaId || !nossoNumero) {
-        return res.status(400).json({ error: 'Fatura ID e Nosso Número são obrigatórios.' });
-      }
-
-      console.log(`[Bradesco API Baixar] Iniciando solicitação de baixa para Fatura: ${faturaId}, NossoNúmero: ${nossoNumero}`);
-
-      const settings = await db.getIntegrationSettings();
-      const env = settings.bradesco_env || 'sandbox';
-      const isProduction = env === 'production';
-
-      const clientId = settings.bradesco_client_id;
-      const clientSecret = settings.bradesco_client_secret;
-      const agency = settings.bradesco_agency;
-      const account = settings.bradesco_account;
-      const wallet = settings.bradesco_wallet || '09';
-      const cnpjBeneficiario = settings.bradesco_cnpj;
-
-      const certContent = settings.bradesco_cert;
-      const keyContent = settings.bradesco_key;
-
-      let apiLog = '';
-      let apiSuccess = false;
-
-      if (clientId && clientSecret && certContent && keyContent && agency && account && cnpjBeneficiario) {
-        try {
-          console.log(`[Bradesco API Baixar] Autenticando em mTLS ambiente: ${env.toUpperCase()}`);
-          const tokenHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-          const tokenPath = '/auth/server-mtls/v2/token';
-
-          const authBody = querystring.stringify({
-            grant_type: 'client_credentials',
-            client_id: clientId,
-            client_secret: clientSecret
-          });
-
-          const tokenRes: any = await new Promise((resolve, reject) => {
-            const reqOpts = {
-              hostname: tokenHost,
-              port: 443,
-              path: tokenPath,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Content-Length': Buffer.byteLength(authBody)
-              },
-              cert: certContent,
-              key: keyContent,
-              passphrase: settings.bradesco_passphrase || undefined,
-              rejectUnauthorized: false
-            };
-
-            const req = https.request(reqOpts, (res) => {
-              let data = '';
-              res.on('data', (chunk) => { data += chunk; });
-              res.on('end', () => {
-                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                  try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
-                } else {
-                  reject(new Error(`Erro Token HTTP ${res.statusCode}: ${data}`));
-                }
-              });
-            });
-
-            req.on('error', (e) => reject(e));
-            req.write(authBody);
-            req.end();
-          });
-
-          const accessToken = tokenRes.access_token;
-          if (!accessToken) {
-            throw new Error('access_token não retornado de Bradesco.');
-          }
-
-          const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-          const registerPath = '/boleto-hibrido/cobranca-registro/v1/baixarBoleto';
-
-          const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
-          const cleanAccount = account.split('-')[0].replace(/\D/g, '').padStart(7, '0');
-          const cleanWallet = wallet.replace(/\D/g, '').padStart(2, '0');
-          const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '').padStart(14, '0');
-
-          const isCnpj = cleanCnpj.length > 11;
-          const cpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(0, 8)) : Number(cleanCnpj.substring(0, 9));
-          const filialCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(8, 12)) : 0;
-          const controleCpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(12, 14)) : Number(cleanCnpj.substring(9, 11));
-
-          const baixarPayload = {
-            cpfCnpjUsuario: cpfCnpjUsuario,
-            filialCnpjUsuario: filialCnpjUsuario,
-            controleCpfCnpjUsuario: controleCpfCnpjUsuario,
-            idProduto: Number(cleanWallet) || 9,
-            contaProduto: Number(`${cleanAgency}${cleanAccount}`),
-            nomePersonalizado: 'bradesco',
-            nossoNumero: Number(nossoNumero)
-          };
-
-          console.log(`[Bradesco API Baixar] Enviando payload para baixarBoleto:`, baixarPayload);
-
-          const baixaRes: any = await new Promise((resolve, reject) => {
-            const reqOpts = {
-              hostname: registerHost,
-              port: 443,
-              path: registerPath,
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': accessToken.startsWith('Bearer') ? accessToken : `Bearer ${accessToken}`
-              },
-              cert: certContent,
-              key: keyContent,
-              passphrase: settings.bradesco_passphrase || undefined,
-              rejectUnauthorized: false
-            };
-
-            const req = https.request(reqOpts, (res) => {
-              let data = '';
-              res.on('data', (chunk) => { data += chunk; });
-              res.on('end', () => {
-                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-                  try { resolve(JSON.parse(data)); } catch (e) { resolve(data); }
-                } else {
-                  reject(new Error(`Erro Baixa HTTP ${res.statusCode}: ${data}`));
-                }
-              });
-            });
-
-            req.on('error', (e) => reject(e));
-            req.write(JSON.stringify(baixarPayload));
-            req.end();
-          });
-
-          console.log('[Bradesco API Baixar] Boleto baixado com sucesso via API oficial!', baixaRes);
-          apiLog = 'Baixado com sucesso via API Bradesco Oficial com mTLS.';
-          apiSuccess = true;
-
-        } catch (apiError: any) {
-          console.error('[Bradesco API Baixar] Erro na requisição mTLS Bradesco:', apiError.message);
-          if (!isProduction) {
-            console.log('[Bradesco API Baixar] Simulando baixa bem-sucedida em ambiente Sandbox devido a erro na chamada real.');
-            apiLog = `Simulado em Sandbox (Chamada mTLS falhou: ${apiError.message})`;
-            apiSuccess = true;
-          } else {
-            return res.status(400).json({
-              success: false,
-              error: `Erro ao baixar boleto na API Bradesco: ${apiError.message}`
-            });
-          }
-        }
-      } else {
-        console.log('[Bradesco API Baixar] Simulando baixa de boleto (Configurações ou Certificados mTLS incompletos)');
-        apiLog = 'Simulado com sucesso localmente (mTLS ausente ou incompleto).';
-        apiSuccess = true;
-      }
-
-      if (apiSuccess) {
-        await db.saveBradescoBoletoStatus(faturaId, true, 'BAIXADO', new Date().toISOString().split('T')[0]);
-        return res.json({
-          success: true,
-          mocked: !clientId || !certContent,
-          apiLog,
-          status: 'BAIXADO'
-        });
-      }
-
-      return res.status(400).json({ success: false, error: 'Não foi possível concluir a baixa do boleto.' });
-
-    } catch (e: any) {
-      console.error('[Bradesco API Baixar] Erro geral:', e);
-      res.status(500).json({ error: e.message || 'Erro ao processar baixa de boleto Bradesco.' });
-    }
-  });
-
   // POST: Enviar E-mail via SMTP Configurado
   app.post('/api/integration/email/send', async (req, res) => {
     try {
@@ -2090,30 +1872,6 @@ async function startServer() {
       const vCart = String(carteira || '09');
       const vBenef = String(beneficiario || 'UNITY AUTOMACOES LTDA.');
       const vCnpjB = String(cnpj_beneficiario || '44.285.891/0001-45');
-
-      // Obter instruções customizadas (da query ou do banco de dados)
-      let customInstructions = String(req.query.instrucoes || '').trim();
-      if (!customInstructions) {
-        try {
-          const settings = await db.getIntegrationSettings();
-          customInstructions = settings.bradesco_instrucoes || '';
-        } catch (dbErr) {
-          console.error('Erro ao buscar instruções de cobrança do banco:', dbErr);
-        }
-      }
-
-      if (!customInstructions) {
-        customInstructions = '• NÃO RECEBER APÓS O VENCIMENTO.\n• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO.\n• PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA OU PELO SEU INTERNET BANKING.';
-      }
-
-      const instructionLines = customInstructions.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      const formattedInstructionsTopHTML = instructionLines.map((line, idx) => {
-        return `<span class="value block ${idx < instructionLines.length - 1 ? 'mb-1' : ''} text-gray-700 font-normal">${line}</span>`;
-      }).join('\n');
-
-      const formattedInstructionsBottomHTML = instructionLines.map(line => {
-        return `<p>${line}</p>`;
-      }).join('\n');
 
       // Helper para formatar a linha digitável com os pontos e espaços padrões se vier limpa do banco
       const formatLinhaDigitavel = (raw: string): string => {
@@ -2358,7 +2116,12 @@ async function startServer() {
               <tr>
                 <td colspan="5" class="h-12">
                   <span class="label">Instruções (Todas as instruções de cobrança são de inteira responsabilidade do beneficiário)</span>
-                  ${formattedInstructionsTopHTML}
+                  <span class="value block mb-1 text-gray-700 font-normal">
+                    • NÃO RECEBER APÓS O VENCIMENTO.
+                  </span>
+                  <span class="value block text-gray-700 font-normal">
+                    • BOLETO REFERENTE ÀS FATURAS DA INTEGRAÇÃO DO BOM CONTROLE.
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -2441,7 +2204,9 @@ async function startServer() {
                 <td colspan="4" rowspan="2" class="h-32">
                   <span class="label">Instruções (Todas as instruções de cobrança são de inteira responsabilidade do beneficiário)</span>
                   <div class="text-xs font-semibold space-y-1 mt-1 text-black">
-                    ${formattedInstructionsBottomHTML}
+                    <p>• NÃO RECEBER APÓS O VENCIMENTO.</p>
+                    <p>• PROTESTO AUTOMÁTICO APÓS 10 DIAS DO VENCIMENTO.</p>
+                    <p>• PAGÁVEL EM QUALQUER AGÊNCIA BANCÁRIA OU PELO SEU INTERNET BANKING.</p>
                   </div>
                 </td>
                 <td>
