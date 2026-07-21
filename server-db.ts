@@ -23,7 +23,7 @@ interface DatabaseSchema {
   companies?: (CompanySettings & { id: number })[];
   products?: Product[];
   integration_settings?: IntegrationSettings;
-  bradesco_boletos_links?: { fatura_id: string; link_boleto: string; nosso_numero?: string; created_at?: string }[];
+  bradesco_boletos_links?: { fatura_id: string; link_boleto: string; nosso_numero?: string; api_quitado?: boolean; api_status?: string | null; api_data_movimentacao?: string | null; created_at?: string }[];
 }
 
 // Configurações padrão corporativas
@@ -279,12 +279,28 @@ class Database {
             fatura_id VARCHAR(50) PRIMARY KEY,
             link_boleto TEXT NOT NULL,
             nosso_numero VARCHAR(50) DEFAULT NULL,
+            api_quitado BOOLEAN DEFAULT FALSE,
+            api_status VARCHAR(100) DEFAULT NULL,
+            api_data_movimentacao VARCHAR(50) DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         `);
         console.log('[Database Migration] Tabela "bradesco_boletos_links" criada ou validada com sucesso.');
+
+        // Garante que novas colunas de status existam na tabela bradesco_boletos_links
+        const statusCols = [
+          { name: 'api_quitado', type: 'BOOLEAN DEFAULT FALSE' },
+          { name: 'api_status', type: 'VARCHAR(100) DEFAULT NULL' },
+          { name: 'api_data_movimentacao', type: 'VARCHAR(50) DEFAULT NULL' }
+        ];
+        for (const col of statusCols) {
+          try {
+            await pool.query(`ALTER TABLE bradesco_boletos_links ADD COLUMN ${col.name} ${col.type}`);
+            console.log(`[Database Migration] Coluna "${col.name}" adicionada em "bradesco_boletos_links".`);
+          } catch (err) {}
+        }
       } catch (err) {
-        console.error('[Database Migration] Erro ao criar "bradesco_boletos_links":', err);
+        console.error('[Database Migration] Erro ao criar ou migrar "bradesco_boletos_links":', err);
       }
 
     } catch (e) {
@@ -1949,11 +1965,23 @@ class Database {
         this.schema.bradesco_boletos_links = [];
       }
       const existingIdx = this.schema.bradesco_boletos_links.findIndex(item => item.fatura_id === fId);
-      const record = { fatura_id: fId, link_boleto: link, nosso_numero: nossoNumero, created_at: new Date().toISOString() };
       if (existingIdx >= 0) {
-        this.schema.bradesco_boletos_links[existingIdx] = record;
+        const prev = this.schema.bradesco_boletos_links[existingIdx];
+        this.schema.bradesco_boletos_links[existingIdx] = {
+          ...prev,
+          link_boleto: link,
+          nosso_numero: nossoNumero || prev.nosso_numero
+        };
       } else {
-        this.schema.bradesco_boletos_links.push(record);
+        this.schema.bradesco_boletos_links.push({
+          fatura_id: fId,
+          link_boleto: link,
+          nosso_numero: nossoNumero || null,
+          api_quitado: false,
+          api_status: null,
+          api_data_movimentacao: null,
+          created_at: new Date().toISOString()
+        });
       }
       this.saveJSON();
       return;
@@ -1966,6 +1994,42 @@ class Database {
       `, [fId, link, nossoNumero || null]);
     } catch (err) {
       console.error('[Database] Erro ao salvar link do boleto Bradesco:', err);
+    }
+  }
+
+  async saveBradescoBoletoStatus(faturaId: string | number, quitado: boolean, status: string, dataMovimentacao?: string): Promise<void> {
+    const fId = String(faturaId);
+    if (!pool) {
+      if (!this.schema.bradesco_boletos_links) {
+        this.schema.bradesco_boletos_links = [];
+      }
+      const existingIdx = this.schema.bradesco_boletos_links.findIndex(item => item.fatura_id === fId);
+      if (existingIdx >= 0) {
+        this.schema.bradesco_boletos_links[existingIdx].api_quitado = quitado;
+        this.schema.bradesco_boletos_links[existingIdx].api_status = status;
+        this.schema.bradesco_boletos_links[existingIdx].api_data_movimentacao = dataMovimentacao || null;
+      } else {
+        this.schema.bradesco_boletos_links.push({
+          fatura_id: fId,
+          link_boleto: '',
+          nosso_numero: null,
+          api_quitado: quitado,
+          api_status: status,
+          api_data_movimentacao: dataMovimentacao || null,
+          created_at: new Date().toISOString()
+        });
+      }
+      this.saveJSON();
+      return;
+    }
+    try {
+      await pool.query(`
+        INSERT INTO bradesco_boletos_links (fatura_id, link_boleto, api_quitado, api_status, api_data_movimentacao)
+        VALUES (?, '', ?, ?, ?)
+        ON DUPLICATE KEY UPDATE api_quitado = VALUES(api_quitado), api_status = VALUES(api_status), api_data_movimentacao = VALUES(api_data_movimentacao)
+      `, [fId, quitado, status, dataMovimentacao || null]);
+    } catch (err) {
+      console.error('[Database] Erro ao salvar status do boleto Bradesco:', err);
     }
   }
 
@@ -1988,8 +2052,8 @@ class Database {
     }
   }
 
-  async getBradescoBoletosLinks(faturaIds: (string | number)[]): Promise<Record<string, { link: string; nossonumero?: string; nosso_numero?: string }>> {
-    const result: Record<string, { link: string; nossonumero?: string; his_nosso_numero?: string; nosso_numero?: string }> = {};
+  async getBradescoBoletosLinks(faturaIds: (string | number)[]): Promise<Record<string, { link: string; nossonumero?: string; nosso_numero?: string; api_quitado?: boolean; api_status?: string; api_data_movimentacao?: string }>> {
+    const result: Record<string, { link: string; nossonumero?: string; his_nosso_numero?: string; nosso_numero?: string; api_quitado?: boolean; api_status?: string; api_data_movimentacao?: string }> = {};
     if (faturaIds.length === 0) return result;
     const stringIds = faturaIds.map(id => String(id));
 
@@ -1997,16 +2061,30 @@ class Database {
       if (!this.schema.bradesco_boletos_links) return result;
       for (const item of this.schema.bradesco_boletos_links) {
         if (stringIds.includes(item.fatura_id)) {
-          result[item.fatura_id] = { link: item.link_boleto, nossonumero: item.nosso_numero, nosso_numero: item.nosso_numero };
+          result[item.fatura_id] = {
+            link: item.link_boleto,
+            nossonumero: item.nosso_numero,
+            nosso_numero: item.nosso_numero,
+            api_quitado: item.api_quitado,
+            api_status: item.api_status,
+            api_data_movimentacao: item.api_data_movimentacao
+          };
         }
       }
       return result;
     }
 
     try {
-      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero FROM bradesco_boletos_links WHERE fatura_id IN (?)', [stringIds]);
+      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [stringIds]);
       for (const row of rows) {
-        result[row.fatura_id] = { link: row.link_boleto, nossonumero: row.nosso_numero, nosso_numero: row.nosso_numero };
+        result[row.fatura_id] = {
+          link: row.link_boleto,
+          nossonumero: row.nosso_numero,
+          nosso_numero: row.nosso_numero,
+          api_quitado: row.api_quitado === 1 || row.api_quitado === true,
+          api_status: row.api_status,
+          api_data_movimentacao: row.api_data_movimentacao
+        };
       }
       return result;
     } catch (err) {

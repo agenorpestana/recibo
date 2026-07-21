@@ -2280,15 +2280,33 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                         {checkingStatusId === String(f.Id) ? 'Buscando...' : 'Buscar Boleto'}
                                       </button>
                                     )}
-                                    {statusCheckResults[String(f.Id)] && (
-                                      <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
-                                        statusCheckResults[String(f.Id)].quitado 
-                                          ? 'bg-green-100 text-green-800' 
-                                          : 'bg-indigo-100 text-indigo-800'
-                                      }`} title={statusCheckResults[String(f.Id)].message}>
-                                        API: {statusCheckResults[String(f.Id)].status}
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const hasLiveResult = !!statusCheckResults[String(f.Id)];
+                                      const hasSavedResult = !!f.ApiStatus;
+                                      if (!hasLiveResult && !hasSavedResult) return null;
+
+                                      const isQuitada = hasLiveResult 
+                                        ? statusCheckResults[String(f.Id)].quitado 
+                                        : (f.ApiQuitado === true);
+                                      
+                                      const statusText = hasLiveResult 
+                                        ? statusCheckResults[String(f.Id)].status 
+                                        : f.ApiStatus;
+
+                                      const titleText = hasLiveResult
+                                        ? statusCheckResults[String(f.Id)].message
+                                        : `Status Bradesco salvo no banco de dados local. Movimentação: ${f.ApiDataMovimentacao || 'Não informada'}`;
+
+                                      return (
+                                        <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                                          isQuitada 
+                                            ? 'bg-green-100 text-green-800' 
+                                            : 'bg-indigo-100 text-indigo-800'
+                                        }`} title={titleText}>
+                                          API: {statusText}
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
                               </div>
@@ -2712,29 +2730,53 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       </div>
 
                       {/* Resultado de status consultado individualmente */}
-                      {statusCheckResults[String(fetchedFatura.Id)] && (
-                        <div className="bg-white p-2.5 rounded border border-indigo-150 text-[11px] space-y-1.5 animate-fade-in shadow-xs">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-gray-500 uppercase text-[9px]">Status Bradesco:</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
-                              statusCheckResults[String(fetchedFatura.Id)].quitado
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-amber-100 text-amber-800'
-                            }`}>
-                              {statusCheckResults[String(fetchedFatura.Id)].status}
-                            </span>
-                          </div>
-                          {statusCheckResults[String(fetchedFatura.Id)].dataMovimentacao && (
-                            <div className="flex justify-between">
-                              <span className="text-gray-400 font-medium">Data Movimentação:</span>
-                              <span className="font-mono font-semibold">{statusCheckResults[String(fetchedFatura.Id)].dataMovimentacao}</span>
+                      {(() => {
+                        const hasLiveResult = !!statusCheckResults[String(fetchedFatura.Id)];
+                        const hasSavedResult = !!fetchedFatura.ApiStatus;
+                        if (!hasLiveResult && !hasSavedResult) return null;
+
+                        const isQuitada = hasLiveResult 
+                          ? statusCheckResults[String(fetchedFatura.Id)].quitado 
+                          : (fetchedFatura.ApiQuitado === true);
+                        
+                        const statusText = hasLiveResult 
+                          ? statusCheckResults[String(fetchedFatura.Id)].status 
+                          : fetchedFatura.ApiStatus;
+
+                        const dataMov = hasLiveResult
+                          ? statusCheckResults[String(fetchedFatura.Id)].dataMovimentacao
+                          : fetchedFatura.ApiDataMovimentacao;
+
+                        const messageText = hasLiveResult
+                          ? statusCheckResults[String(fetchedFatura.Id)].message
+                          : (fetchedFatura.ApiQuitado 
+                              ? 'Boleto liquidado e persistido localmente.' 
+                              : 'Boleto registrado e persistido localmente.');
+
+                        return (
+                          <div className="bg-white p-2.5 rounded border border-indigo-150 text-[11px] space-y-1.5 animate-fade-in shadow-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-gray-500 uppercase text-[9px]">Status Bradesco:</span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
+                                isQuitada
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {statusText}
+                              </span>
                             </div>
-                          )}
-                          <p className="text-[10px] text-gray-500 italic bg-gray-50 p-1.5 rounded border border-gray-100">
-                            {statusCheckResults[String(fetchedFatura.Id)].message}
-                          </p>
-                        </div>
-                      )}
+                            {dataMov && (
+                              <div className="flex justify-between">
+                                <span className="text-gray-400 font-medium">Data Movimentação:</span>
+                                <span className="font-mono font-semibold">{dataMov}</span>
+                              </div>
+                            )}
+                            <p className="text-[10px] text-gray-500 italic bg-gray-50 p-1.5 rounded border border-gray-100">
+                              {messageText}
+                            </p>
+                          </div>
+                        );
+                      })()}
 
                       {bradescoError && (
                         <div className="text-[10px] text-red-700 bg-red-100/60 p-2 rounded border border-red-200">

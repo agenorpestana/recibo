@@ -495,16 +495,25 @@ async function startServer() {
       // Enriquecer com dados do cliente e da empresa
       const enriched = await enrichFatura(data, apiKey);
 
-      const savedLink = await db.getBradescoBoletoLink(id);
-      if (savedLink) {
-        if (savedLink.startsWith('/')) {
-          const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-          const host = req.get('host');
-          enriched.LinkBoleto = `${protocol}://${host}${savedLink}`;
-        } else {
-          enriched.LinkBoleto = savedLink;
+      const savedLinks = await db.getBradescoBoletosLinks([id]);
+      const saved = savedLinks[String(id)];
+      if (saved) {
+        if (saved.link) {
+          if (saved.link.startsWith('/')) {
+            const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+            const host = req.get('host');
+            enriched.LinkBoleto = `${protocol}://${host}${saved.link}`;
+          } else {
+            enriched.LinkBoleto = saved.link;
+          }
         }
         enriched.IsBradescoBoleto = true;
+        enriched.NossoNumeroBradesco = saved.nosso_numero || saved.nossonumero;
+        const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1;
+        enriched.Quitada = enriched.Quitada || isApiQuitada;
+        enriched.ApiQuitado = isApiQuitada;
+        enriched.ApiStatus = saved.api_status;
+        enriched.ApiDataMovimentacao = saved.api_data_movimentacao;
       }
 
       res.json(enriched);
@@ -609,14 +618,20 @@ async function startServer() {
         const saved = savedLinks[String(f.Id)];
         if (saved) {
           let absoluteLink = saved.link;
-          if (saved.link.startsWith('/')) {
+          if (saved.link && saved.link.startsWith('/')) {
             absoluteLink = `${protocol}://${host}${saved.link}`;
           }
+          const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1;
           return {
             ...f,
-            LinkBoleto: absoluteLink,
+            LinkBoleto: absoluteLink || f.LinkBoleto,
             IsBradescoBoleto: true,
-            NossoNumeroBradesco: saved.nosso_numero || saved.nossonumero
+            NossoNumeroBradesco: saved.nosso_numero || saved.nossonumero,
+            // Força o status de Quitada localmente se já foi marcada como paga/quitada no Bradesco
+            Quitada: f.Quitada || isApiQuitada,
+            ApiQuitado: isApiQuitada,
+            ApiStatus: saved.api_status,
+            ApiDataMovimentacao: saved.api_data_movimentacao
           };
         }
         return f;
@@ -1429,6 +1444,7 @@ async function startServer() {
         if (!isProduction) {
           // Simula com base no ID da fatura para dar variabilidade realista
           const isSimulatedPaid = Number(faturaId) % 2 === 0;
+          await db.saveBradescoBoletoStatus(faturaId, isSimulatedPaid, isSimulatedPaid ? 'LIQUIDADO' : 'REGISTRADO', isSimulatedPaid ? new Date().toISOString().split('T')[0] : '');
           return res.json({
             success: true,
             quitado: isSimulatedPaid,
@@ -1663,6 +1679,7 @@ async function startServer() {
 
         // Salvar no banco de dados local para que o link fique persistido e seja resgatado no futuro
         await db.saveBradescoBoletoLink(faturaId, bradescoLink, nossoNumero);
+        await db.saveBradescoBoletoStatus(faturaId, isQuitada, descStatus || cdStatus || 'REGISTRADO', dataMovimentacao);
 
         res.json({
           success: true,
@@ -1678,6 +1695,7 @@ async function startServer() {
         // Fallback amigável de sandbox se der erro e não for produção
         if (!isProduction) {
           const isSimulatedPaid = Number(faturaId) % 2 === 0;
+          await db.saveBradescoBoletoStatus(faturaId, isSimulatedPaid, isSimulatedPaid ? 'LIQUIDADO' : 'REGISTRADO', isSimulatedPaid ? new Date().toISOString().split('T')[0] : '');
           return res.json({
             success: true,
             quitado: isSimulatedPaid,
