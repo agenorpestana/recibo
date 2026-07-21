@@ -781,7 +781,9 @@ async function startServer() {
       if (pdfUrl) {
         try {
           let downloadUrl = pdfUrl;
+          let isMicrolink = false;
           if (pdfUrl.includes('/api/integration/bradesco/visualizar-boleto')) {
+            isMicrolink = true;
             let externalUrl = pdfUrl;
             if (pdfUrl.includes('localhost') || pdfUrl.includes('127.0.0.1') || pdfUrl.startsWith('/')) {
               const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
@@ -797,8 +799,27 @@ async function startServer() {
           }
           const pdfResponse = await fetch(downloadUrl);
           if (pdfResponse.ok) {
-            const arrayBuffer = await pdfResponse.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            let buffer: Buffer;
+            if (isMicrolink) {
+              const json: any = await pdfResponse.json();
+              if (json.status === 'success' && json.data && json.data.pdf && json.data.pdf.url) {
+                const actualPdfUrl = json.data.pdf.url;
+                console.log(`[Whaticket Proxy] Microlink gerou com sucesso o PDF: ${actualPdfUrl}. Baixando bytes reais...`);
+                const actualPdfResponse = await fetch(actualPdfUrl);
+                if (actualPdfResponse.ok) {
+                  const arrayBuffer = await actualPdfResponse.arrayBuffer();
+                  buffer = Buffer.from(arrayBuffer);
+                } else {
+                  throw new Error(`Erro ao baixar PDF real do CDN da Microlink, status HTTP ${actualPdfResponse.status}`);
+                }
+              } else {
+                console.error('[Whaticket Proxy] Resposta inesperada do Microlink:', json);
+                throw new Error(`Resposta do Microlink não contém a URL do PDF. Status: ${json.status}`);
+              }
+            } else {
+              const arrayBuffer = await pdfResponse.arrayBuffer();
+              buffer = Buffer.from(arrayBuffer);
+            }
 
             if ((globalThis as any).FormData && (globalThis as any).Blob) {
               const form = new (globalThis as any).FormData();
@@ -1708,7 +1729,9 @@ async function startServer() {
       if (pdfUrl) {
         try {
           let downloadUrl = pdfUrl;
+          let isMicrolink = false;
           if (pdfUrl.includes('/api/integration/bradesco/visualizar-boleto')) {
+            isMicrolink = true;
             let externalUrl = pdfUrl;
             if (pdfUrl.includes('localhost') || pdfUrl.includes('127.0.0.1') || pdfUrl.startsWith('/')) {
               const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
@@ -1724,10 +1747,31 @@ async function startServer() {
           }
           const response = await fetch(downloadUrl);
           if (response.ok) {
-            const buffer = await response.arrayBuffer();
+            let buffer: Buffer;
+            if (isMicrolink) {
+              const json: any = await response.json();
+              if (json.status === 'success' && json.data && json.data.pdf && json.data.pdf.url) {
+                const actualPdfUrl = json.data.pdf.url;
+                console.log(`[Email SMTP] Microlink gerou com sucesso o PDF: ${actualPdfUrl}. Baixando bytes reais...`);
+                const actualPdfResponse = await fetch(actualPdfUrl);
+                if (actualPdfResponse.ok) {
+                  const arrayBuffer = await actualPdfResponse.arrayBuffer();
+                  buffer = Buffer.from(arrayBuffer);
+                } else {
+                  throw new Error(`Erro ao baixar PDF real do CDN da Microlink, status HTTP ${actualPdfResponse.status}`);
+                }
+              } else {
+                console.error('[Email SMTP] Resposta inesperada do Microlink:', json);
+                throw new Error(`Resposta do Microlink não contém a URL do PDF. Status: ${json.status}`);
+              }
+            } else {
+              const arrayBuffer = await response.arrayBuffer();
+              buffer = Buffer.from(arrayBuffer);
+            }
+
             attachments.push({
               filename: filename || 'boleto.pdf',
-              content: Buffer.from(buffer)
+              content: buffer
             });
           } else {
             console.warn(`[Email SMTP] Não foi possível baixar o anexo, status HTTP: ${response.status}`);
