@@ -1201,6 +1201,48 @@ async function startServer() {
         const numMatch = pagadorEnd.match(/\d+/);
         const enroLogdrSacdo = numMatch ? numMatch[0].substring(0, 10) : 'S/N';
 
+        // Cálculo de Juros, Multa e Desconto de acordo com as configurações da integração
+        let ptxJuroVcto = 0;
+        let vdiaJuroMora = 0;
+        let qdiaInicJuro = 0;
+
+        if (settings.bradesco_juros_tipo === 'mensal') {
+          ptxJuroVcto = Math.round((settings.bradesco_juros_valor || 0) * 100000);
+          qdiaInicJuro = 1;
+        } else if (settings.bradesco_juros_tipo === 'diario') {
+          vdiaJuroMora = Math.round(valor * ((settings.bradesco_juros_valor || 0) / 100) * 100);
+          qdiaInicJuro = 1;
+        }
+
+        let pmultaAplicVcto = 0;
+        let vmultaAtrsoPgto = 0;
+        let qdiaInicMulta = 0;
+
+        if (settings.bradesco_multa_tipo === 'percentual') {
+          pmultaAplicVcto = Math.round((settings.bradesco_multa_valor || 0) * 100000);
+          qdiaInicMulta = 1;
+        } else if (settings.bradesco_multa_tipo === 'valor') {
+          vmultaAtrsoPgto = Math.round((settings.bradesco_multa_valor || 0) * 100);
+          qdiaInicMulta = 1;
+        }
+
+        let pdescBonifPgto01 = 0;
+        let vdescBonifPgto01 = 0;
+        let dlimDescBonif1 = "";
+
+        if (settings.bradesco_desconto_tipo && settings.bradesco_desconto_tipo !== 'isento') {
+          const discountDays = settings.bradesco_desconto_dias || 0;
+          const dueDate = new Date(vencimento + 'T12:00:00');
+          dueDate.setDate(dueDate.getDate() - discountDays);
+          dlimDescBonif1 = dueDate.toISOString().split('T')[0].split('-').reverse().join('.');
+
+          if (settings.bradesco_desconto_tipo === 'percentual') {
+            pdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100000);
+          } else if (settings.bradesco_desconto_tipo === 'valor') {
+            vdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100);
+          }
+        }
+
         const registerPayload = {
           ctitloCobrCdent: Number(nossoNumero.replace(/\D/g, '')) || 0,
           registrarTitulo: 1,
@@ -1239,17 +1281,17 @@ async function startServer() {
           qtdDecurPrz: "0",
           codNegativacao: "0",
           diasNegativacao: "0",
-          ptxJuroVcto: 0,
+          ptxJuroVcto: ptxJuroVcto,
           filler1: "",
-          vdiaJuroMora: 0,
-          pmultaAplicVcto: 0,
-          qdiaInicJuro: 0,
-          vmultaAtrsoPgto: 0,
-          pdescBonifPgto01: 0,
-          qdiaInicMulta: 0,
-          vdescBonifPgto01: 0,
+          vdiaJuroMora: vdiaJuroMora,
+          pmultaAplicVcto: pmultaAplicVcto,
+          qdiaInicJuro: qdiaInicJuro,
+          vmultaAtrsoPgto: vmultaAtrsoPgto,
+          pdescBonifPgto01: pdescBonifPgto01,
+          qdiaInicMulta: qdiaInicMulta,
+          vdescBonifPgto01: vdescBonifPgto01,
           pdescBonifPgto02: 0,
-          dlimDescBonif1: "",
+          dlimDescBonif1: dlimDescBonif1,
           vdescBonifPgto02: 0,
           pdescBonifPgto03: 0,
           dlimDescBonif2: "",

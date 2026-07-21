@@ -4,7 +4,7 @@ import {
   Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
   HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
   Search, FileText, Send, Key, Mail, RefreshCw, AlertCircle, ExternalLink, 
-  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard
+  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard, Info
 } from 'lucide-react';
 
 interface CompanySettingsTabProps {
@@ -1790,6 +1790,121 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                     placeholder="CNPJ Bradesco Beneficiário"
                     className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   />
+                </div>
+
+                {/* Regras de Multa, Juros e Desconto de acordo com o manual Bradesco */}
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <CreditCard className="h-4 w-4 text-indigo-500" />
+                    Regras de Multa, Juros e Desconto
+                  </h4>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50/50 p-3.5 rounded-lg border border-gray-200/80">
+                    {/* Linha 1: Multa e Juros */}
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Multa</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={integrationSettings.bradesco_multa_tipo || 'isento'}
+                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_multa_tipo: e.target.value as any })}
+                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        >
+                          <option value="isento">Isento</option>
+                          <option value="percentual">Percentual</option>
+                          <option value="valor">Valor</option>
+                        </select>
+                        <div className="relative flex-1">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
+                            {integrationSettings.bradesco_multa_tipo === 'valor' ? 'R$' : '%'}
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            disabled={integrationSettings.bradesco_multa_tipo === 'isento'}
+                            value={integrationSettings.bradesco_multa_valor !== undefined ? integrationSettings.bradesco_multa_valor : 0}
+                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_multa_valor: parseFloat(e.target.value) || 0 })}
+                            placeholder="0,00"
+                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Percentual juros</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={integrationSettings.bradesco_juros_tipo || 'isento'}
+                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_juros_tipo: e.target.value as any })}
+                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        >
+                          <option value="isento">Isento</option>
+                          <option value="diario">Diário</option>
+                          <option value="mensal">Mensal</option>
+                        </select>
+                        <div className="relative flex-1">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
+                            %
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            disabled={integrationSettings.bradesco_juros_tipo === 'isento'}
+                            value={integrationSettings.bradesco_juros_valor !== undefined ? integrationSettings.bradesco_juros_valor : 0}
+                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_juros_valor: parseFloat(e.target.value) || 0 })}
+                            placeholder="0,00"
+                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Linha 2: Desconto e Dias de Antecedência */}
+                    <div className="space-y-1">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase">Desconto até o vencimento</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={integrationSettings.bradesco_desconto_tipo || 'isento'}
+                          onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_tipo: e.target.value as any })}
+                          className="block w-1/2 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        >
+                          <option value="isento">Isento</option>
+                          <option value="percentual">Percentual</option>
+                          <option value="valor">Valor</option>
+                        </select>
+                        <div className="relative flex-1">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-[10px] font-bold text-gray-400 font-mono select-none">
+                            {integrationSettings.bradesco_desconto_tipo === 'valor' ? 'R$' : '%'}
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            disabled={integrationSettings.bradesco_desconto_tipo === 'isento'}
+                            value={integrationSettings.bradesco_desconto_valor !== undefined ? integrationSettings.bradesco_desconto_valor : 0}
+                            onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_valor: parseFloat(e.target.value) || 0 })}
+                            placeholder="0,00"
+                            className="block w-full rounded-lg border border-gray-300 pl-8 pr-2 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
+                        Dias antecedência para desconto
+                        <Info className="h-3 w-3 text-gray-400" title="Quantidade de dias antes do vencimento para aplicar o desconto" />
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        disabled={integrationSettings.bradesco_desconto_tipo === 'isento'}
+                        value={integrationSettings.bradesco_desconto_dias !== undefined ? integrationSettings.bradesco_desconto_dias : 0}
+                        onChange={(e) => setIntegrationSettings({ ...integrationSettings, bradesco_desconto_dias: parseInt(e.target.value) || 0 })}
+                        placeholder="0"
+                        className="block w-full rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-900 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-400"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* mTLS Certificates content */}
