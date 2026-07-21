@@ -128,6 +128,7 @@ export interface IntegrationSettings {
   bradesco_desconto_tipo?: 'isento' | 'percentual' | 'valor';
   bradesco_desconto_valor?: number;
   bradesco_desconto_dias?: number;
+  bradesco_instrucoes?: string;
 
   // Email SMTP
   email_smtp_host?: string;
