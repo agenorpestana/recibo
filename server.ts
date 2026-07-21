@@ -780,8 +780,22 @@ async function startServer() {
       // Se houver pdfUrl, tentamos baixar e enviar como mídia no Whaticket
       if (pdfUrl) {
         try {
-          console.log(`[Whaticket Proxy] Buscando PDF do boleto em: ${pdfUrl}`);
-          const pdfResponse = await fetch(pdfUrl);
+          let downloadUrl = pdfUrl;
+          if (pdfUrl.includes('/api/integration/bradesco/visualizar-boleto')) {
+            let externalUrl = pdfUrl;
+            if (pdfUrl.includes('localhost') || pdfUrl.includes('127.0.0.1') || pdfUrl.startsWith('/')) {
+              const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+              const host = req.get('host');
+              const idx = pdfUrl.indexOf('/api/integration/bradesco/visualizar-boleto');
+              const pathAndQuery = pdfUrl.substring(idx);
+              externalUrl = `${protocol}://${host}${pathAndQuery}`;
+            }
+            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&pdf.margin.top=0.4cm&pdf.margin.bottom=0.4cm&pdf.margin.left=0.4cm&pdf.margin.right=0.4cm`;
+            console.log(`[Whaticket Proxy] Convertendo boleto Bradesco HTML para PDF via Microlink: ${downloadUrl}`);
+          } else {
+            console.log(`[Whaticket Proxy] Buscando PDF do boleto em: ${pdfUrl}`);
+          }
+          const pdfResponse = await fetch(downloadUrl);
           if (pdfResponse.ok) {
             const arrayBuffer = await pdfResponse.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
@@ -1693,8 +1707,22 @@ async function startServer() {
       const attachments: any[] = [];
       if (pdfUrl) {
         try {
-          console.log(`[Email SMTP] Baixando anexo a partir de: ${pdfUrl}`);
-          const response = await fetch(pdfUrl);
+          let downloadUrl = pdfUrl;
+          if (pdfUrl.includes('/api/integration/bradesco/visualizar-boleto')) {
+            let externalUrl = pdfUrl;
+            if (pdfUrl.includes('localhost') || pdfUrl.includes('127.0.0.1') || pdfUrl.startsWith('/')) {
+              const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+              const host = req.get('host');
+              const idx = pdfUrl.indexOf('/api/integration/bradesco/visualizar-boleto');
+              const pathAndQuery = pdfUrl.substring(idx);
+              externalUrl = `${protocol}://${host}${pathAndQuery}`;
+            }
+            downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&pdf.margin.top=0.4cm&pdf.margin.bottom=0.4cm&pdf.margin.left=0.4cm&pdf.margin.right=0.4cm`;
+            console.log(`[Email SMTP] Convertendo boleto Bradesco HTML para PDF via Microlink: ${downloadUrl}`);
+          } else {
+            console.log(`[Email SMTP] Baixando anexo a partir de: ${pdfUrl}`);
+          }
+          const response = await fetch(downloadUrl);
           if (response.ok) {
             const buffer = await response.arrayBuffer();
             attachments.push({
