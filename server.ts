@@ -1720,6 +1720,8 @@ async function startServer() {
         });
       }
 
+      const clientDomain = smtpUser.includes('@') ? smtpUser.split('@')[1] : (smtpHost || 'unityautomacoes.com.br');
+
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
@@ -1727,7 +1729,13 @@ async function startServer() {
         auth: {
           user: smtpUser,
           pass: smtpPass
-        }
+        },
+        name: clientDomain, // Identifica o cliente SMTP como o domínio FQDN para evitar que o Exim/cPanel bloqueie o relay para Gmail/Hotmail
+        tls: {
+          rejectUnauthorized: false // Evita rejeição por certificado SSL autoassinado ou incompatível com o hostname
+        },
+        debug: true, // Ativa logs de depuração detalhados do Nodemailer
+        logger: true // Registra a transação SMTP no console para auditoria rápida
       });
 
       const attachments: any[] = [];
