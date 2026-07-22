@@ -2045,9 +2045,12 @@ class Database {
       }
       const existingIdx = this.schema.bradesco_boletos_links.findIndex(item => item.fatura_id === fId);
       if (existingIdx >= 0) {
-        this.schema.bradesco_boletos_links[existingIdx].api_quitado = quitado;
-        this.schema.bradesco_boletos_links[existingIdx].api_status = status;
-        this.schema.bradesco_boletos_links[existingIdx].api_data_movimentacao = dataMovimentacao || null;
+        const prev = this.schema.bradesco_boletos_links[existingIdx];
+        const wasQuitada = prev.api_quitado === true || String(prev.api_quitado) === '1' || String(prev.api_quitado) === 'true';
+        const finalQuitado = quitado || wasQuitada;
+        this.schema.bradesco_boletos_links[existingIdx].api_quitado = finalQuitado;
+        this.schema.bradesco_boletos_links[existingIdx].api_status = quitado ? status : (prev.api_status || status);
+        this.schema.bradesco_boletos_links[existingIdx].api_data_movimentacao = dataMovimentacao || prev.api_data_movimentacao || null;
       } else {
         this.schema.bradesco_boletos_links.push({
           fatura_id: fId,
@@ -2066,8 +2069,11 @@ class Database {
       await pool.query(`
         INSERT INTO bradesco_boletos_links (fatura_id, link_boleto, api_quitado, api_status, api_data_movimentacao)
         VALUES (?, '', ?, ?, ?)
-        ON DUPLICATE KEY UPDATE api_quitado = VALUES(api_quitado), api_status = VALUES(api_status), api_data_movimentacao = VALUES(api_data_movimentacao)
-      `, [fId, quitado, status, dataMovimentacao || null]);
+        ON DUPLICATE KEY UPDATE 
+          api_quitado = IF(VALUES(api_quitado) = 1 OR api_quitado = 1 OR api_quitado = true, 1, 0),
+          api_status = IF(VALUES(api_quitado) = 1, VALUES(api_status), IF(api_status IS NOT NULL AND api_status != '', api_status, VALUES(api_status))),
+          api_data_movimentacao = IF(VALUES(api_data_movimentacao) IS NOT NULL AND VALUES(api_data_movimentacao) != '', VALUES(api_data_movimentacao), api_data_movimentacao)
+      `, [fId, quitado ? 1 : 0, status, dataMovimentacao || null]);
     } catch (err) {
       console.error('[Database] Erro ao salvar status do boleto Bradesco:', err);
     }

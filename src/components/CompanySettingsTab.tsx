@@ -2447,11 +2447,11 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                       {f.Cliente?.Nome || f.NomeCliente || 'Cliente Não Informado'}
                                     </span>
                                     <span className={`inline-block text-[8px] font-bold px-1.5 py-0.2 rounded-full ${
-                                      f.Quitada 
+                                      (f.Quitada || f.ApiQuitado) 
                                         ? 'bg-green-100 text-green-800' 
                                         : 'bg-amber-100 text-amber-800'
                                     }`}>
-                                      {f.Quitada ? 'Quitada' : 'Pendente'}
+                                      {(f.Quitada || f.ApiQuitado) ? 'Quitada' : 'Pendente'}
                                     </span>
                                   </div>
                                   <div className="flex gap-4 items-center text-[10px] text-gray-400 font-mono">
@@ -2483,7 +2483,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                           <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
                                           {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
                                         </button>
-                                        {!f.Quitada && (
+                                        {!(f.Quitada || f.ApiQuitado) && (
                                           <button
                                             type="button"
                                             onClick={() => handleBaixarBoletoBradesco(f)}
@@ -2880,12 +2880,12 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                       <div className="bg-white p-2.5 rounded-lg border border-gray-100">
                         <span className="text-[9px] font-bold text-gray-400 uppercase block">Status</span>
                         <span className={`inline-flex items-center gap-1 text-[10px] font-bold mt-1 px-2 py-0.5 rounded-full ${
-                          fetchedFatura.Quitada 
+                          (fetchedFatura.Quitada || fetchedFatura.ApiQuitado) 
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-amber-100 text-amber-800'
                         }`}>
                           <CheckCircle className="h-3 w-3 shrink-0" />
-                          {fetchedFatura.Quitada ? 'Quitada' : 'Pendente'}
+                          {(fetchedFatura.Quitada || fetchedFatura.ApiQuitado) ? 'Quitada' : 'Pendente'}
                         </span>
                       </div>
 
@@ -2946,7 +2946,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             )}
                           </button>
 
-                          {fetchedFatura.LinkBoleto && !fetchedFatura.Quitada && (
+                          {fetchedFatura.LinkBoleto && !(fetchedFatura.Quitada || fetchedFatura.ApiQuitado) && (
                             <button
                               type="button"
                               onClick={() => handleBaixarBoletoBradesco(fetchedFatura)}
