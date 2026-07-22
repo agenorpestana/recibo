@@ -4,7 +4,7 @@ import {
   Settings, FileImage, ClipboardSignature, Check, Sparkles, Building2, 
   HelpCircle, Plus, Trash2, Building, Database, Share2, MessageSquare, 
   Search, FileText, Send, Key, Mail, RefreshCw, AlertCircle, ExternalLink, 
-  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard, Info, XCircle
+  Lock, Settings2, BookOpen, CheckCircle, Smartphone, CreditCard, Info, XCircle, Paperclip
 } from 'lucide-react';
 
 interface CompanySettingsTabProps {
@@ -109,7 +109,9 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bulkDelay, setBulkDelay] = useState(10);
   const [bulkLogs, setBulkLogs] = useState<{ id: string; name: string; status: 'pending' | 'loading' | 'sending' | 'success' | 'error'; error?: string }[]>([]);
   const [bulkSendAsMedia, setBulkSendAsMedia] = useState(true);
-  const [bulkActionType, setBulkActionType] = useState<'whatsapp' | 'email' | 'gerar_boleto' | 'consultar_api'>('whatsapp');
+  const [bulkActionType, setBulkActionType] = useState<'whatsapp' | 'email' | 'gerar_boleto' | 'consultar_api' | 'quitar_bomcontrole' | 'anexar_pdf_bomcontrole'>('whatsapp');
+  const [quittingId, setQuittingId] = useState<string | null>(null);
+  const [attachingId, setAttachingId] = useState<string | null>(null);
   const bulkCancelledRef = React.useRef(false);
 
   // Dynamic companies list
@@ -799,6 +801,90 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
     }
   };
 
+  const handleQuitarBomControle = async (fatura: any) => {
+    if (!fatura) return;
+    const faturaId = String(fatura.Id || fatura.id || fatura.IdFatura);
+    if (!faturaId) return;
+
+    if (!window.confirm(`Confirma a quitação / efetuar pagamento da Fatura #${faturaId} no Bom Controle?`)) {
+      return;
+    }
+
+    try {
+      setQuittingId(faturaId);
+      const valorLiquido = fatura.ValorLiquido || fatura.ValorTotal || fatura.Valor || 0;
+      const res = await fetch(`/api/integration/bom-controle/fatura/${faturaId}/efetuar-pagamento`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          valorLiquido,
+          gerarResiduo: false
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Falha ao efetuar pagamento no Bom Controle.');
+      }
+
+      alert(`Fatura #${faturaId} quitada com sucesso no Bom Controle!`);
+
+      // Atualiza estado local
+      setStatusCheckResults(prev => ({
+        ...prev,
+        [faturaId]: {
+          quitado: true,
+          status: 'QUITADA NO BOM CONTROLE',
+          message: 'Pagamento efetuado no Bom Controle.'
+        }
+      }));
+
+      if (fetchedFatura && String(fetchedFatura.Id) === faturaId) {
+        setFetchedFatura((prev: any) => prev ? { ...prev, Quitada: true, ApiQuitado: true, ApiStatus: 'QUITADA NO BOM CONTROLE' } : null);
+      }
+
+      setFaturasList((prevList) => {
+        if (!prevList) return null;
+        return prevList.map((f: any) => String(f.Id) === faturaId ? { ...f, Quitada: true, ApiQuitado: true, ApiStatus: 'QUITADA NO BOM CONTROLE' } : f);
+      });
+
+    } catch (err: any) {
+      alert(`Erro ao quitar no Bom Controle: ${err.message}`);
+    } finally {
+      setQuittingId(null);
+    }
+  };
+
+  const handleAnexarBoletoBomControle = async (fatura: any) => {
+    if (!fatura) return;
+    const faturaId = String(fatura.Id || fatura.id || fatura.IdFatura);
+    if (!faturaId) return;
+
+    try {
+      setAttachingId(faturaId);
+      const link = fatura.LinkBoleto || fatura.linkBoleto;
+      const res = await fetch(`/api/integration/bom-controle/fatura/${faturaId}/upload-anexo`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdfUrl: link,
+          linkBoleto: link
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Falha ao anexar PDF no Bom Controle.');
+      }
+
+      alert(`Boleto em PDF anexado com sucesso na Fatura #${faturaId} do Bom Controle!`);
+    } catch (err: any) {
+      alert(`Erro ao anexar boleto no Bom Controle: ${err.message}`);
+    } finally {
+      setAttachingId(null);
+    }
+  };
+
   const handleSendWhatsApp = async (sendAsMedia: boolean) => {
     if (!whatsAppNumber || whatsAppNumber === '55') {
       setSendError('Por favor, digite um número de telefone válido.');
@@ -1247,6 +1333,58 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
             });
           } else {
             throw new Error(checkData.error || 'Erro ao consultar status da fatura.');
+          }
+        } else if (bulkActionType === 'quitar_bomcontrole') {
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const valorLiquido = data.ValorLiquido || data.ValorTotal || data.Valor || 0;
+          const payRes = await fetch(`/api/integration/bom-controle/fatura/${itemId}/efetuar-pagamento`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              valorLiquido,
+              gerarResiduo: false
+            })
+          });
+
+          if (!payRes.ok) {
+            const errData = await payRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro HTTP ${payRes.status} ao quitar fatura no Bom Controle`);
+          }
+
+          const payData = await payRes.json();
+          if (payData.success) {
+            setFaturasList(prevList => {
+              if (!prevList) return null;
+              return prevList.map(f => String(f.Id) === String(itemId) ? { ...f, Quitada: true, ApiQuitado: true, ApiStatus: 'QUITADA NO BOM CONTROLE' } : f);
+            });
+            if (fetchedFatura && String(fetchedFatura.Id) === String(itemId)) {
+              setFetchedFatura((prev: any) => prev ? { ...prev, Quitada: true, ApiQuitado: true, ApiStatus: 'QUITADA NO BOM CONTROLE' } : null);
+            }
+          } else {
+            throw new Error(payData.error || 'Erro ao efetuar pagamento no Bom Controle.');
+          }
+        } else if (bulkActionType === 'anexar_pdf_bomcontrole') {
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const link = data.LinkBoleto || data.linkBoleto;
+          const attachRes = await fetch(`/api/integration/bom-controle/fatura/${itemId}/upload-anexo`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pdfUrl: link,
+              linkBoleto: link
+            })
+          });
+
+          if (!attachRes.ok) {
+            const errData = await attachRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro HTTP ${attachRes.status} ao anexar PDF no Bom Controle`);
+          }
+
+          const attachData = await attachRes.json();
+          if (!attachData.success) {
+            throw new Error(attachData.error || 'Erro ao anexar PDF no Bom Controle.');
           }
         }
 
@@ -2583,6 +2721,30 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                         {checkingStatusId === String(f.Id) ? 'Buscando...' : 'Buscar Boleto'}
                                       </button>
                                     )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleQuitarBomControle(f)}
+                                      disabled={quittingId === String(f.Id)}
+                                      className="text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
+                                      title="Efetuar Pagamento e quitar fatura no Bom Controle"
+                                    >
+                                      <CheckCircle className={`h-3 w-3 ${quittingId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                      {quittingId === String(f.Id) ? 'Quitando...' : 'Quitar no BC'}
+                                    </button>
+
+                                    {f.LinkBoleto && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAnexarBoletoBomControle(f)}
+                                        disabled={attachingId === String(f.Id)}
+                                        className="text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
+                                        title="Fazer upload do boleto PDF como anexo na fatura do Bom Controle"
+                                      >
+                                        <Paperclip className={`h-3 w-3 ${attachingId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                        {attachingId === String(f.Id) ? 'Anexando...' : 'Anexar PDF no BC'}
+                                      </button>
+                                    )}
                                     {(() => {
                                       const hasLiveResult = !!statusCheckResults[String(f.Id)];
                                       const hasSavedResult = !!f.ApiStatus;
@@ -2653,7 +2815,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                       {/* Seleção do Canal de Envio em Massa */}
                       {!bulkSending && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-gray-100 p-1 rounded-lg">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1 bg-gray-100 p-1 rounded-lg">
                           <button
                             type="button"
                             onClick={() => setBulkActionType('whatsapp')}
@@ -2696,7 +2858,29 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                 : 'text-gray-500 hover:text-gray-800'
                             }`}
                           >
-                            Buscar / Consultar API
+                            Consultar API
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('quitar_bomcontrole')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'quitar_bomcontrole'
+                                ? 'bg-white text-emerald-700 shadow-xs font-extrabold'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            Quitar no BC
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('anexar_pdf_bomcontrole')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'anexar_pdf_bomcontrole'
+                                ? 'bg-white text-blue-700 shadow-xs font-extrabold'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            Anexar PDF no BC
                           </button>
                         </div>
                       )}
@@ -2845,6 +3029,30 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         </div>
                       )}
 
+                      {bulkActionType === 'quitar_bomcontrole' && (
+                        <div className="bg-white/80 p-3 rounded-lg border border-emerald-100/60 text-xs text-gray-600 space-y-2">
+                          <span className="font-bold text-emerald-800 uppercase block text-[9px] tracking-wide flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3 text-emerald-600" />
+                            Efetuar Pagamento / Quitar Faturas no Bom Controle em Massa:
+                          </span>
+                          <p className="text-[10px] text-gray-500">
+                            O sistema irá chamar a API do Bom Controle (<code className="bg-emerald-50 text-emerald-700 px-1 py-0.5 rounded font-mono">EfeturarPagamento</code>) para efetuar o pagamento e dar baixa nas {numSelected} faturas selecionadas diretamente no sistema Bom Controle.
+                          </p>
+                        </div>
+                      )}
+
+                      {bulkActionType === 'anexar_pdf_bomcontrole' && (
+                        <div className="bg-white/80 p-3 rounded-lg border border-blue-100/60 text-xs text-gray-600 space-y-2">
+                          <span className="font-bold text-blue-800 uppercase block text-[9px] tracking-wide flex items-center gap-1">
+                            <Paperclip className="h-3 w-3 text-blue-600" />
+                            Anexar Boleto em PDF no Bom Controle em Massa:
+                          </span>
+                          <p className="text-[10px] text-gray-500">
+                            O sistema irá obter o PDF dos boletos registrados e realizar o upload dos arquivos de cada uma das {numSelected} faturas selecionadas no Bom Controle (<code className="bg-blue-50 text-blue-700 px-1 py-0.5 rounded font-mono">UploadAnexo</code>).
+                          </p>
+                        </div>
+                      )}
+
                       {/* Progresso e Controles durante Envio */}
                       {bulkSending && (
                         <div className="space-y-3.5 bg-white p-3 rounded-xl border border-indigo-150 shadow-xs">
@@ -2890,11 +3098,15 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                       {log.status === 'loading' && 'Consultando Cliente'}
                                       {log.status === 'sending' && (
                                         bulkActionType === 'gerar_boleto' ? 'Registrando...' :
-                                        bulkActionType === 'consultar_api' ? 'Consultando API...' : 'Enviando...'
+                                        bulkActionType === 'consultar_api' ? 'Consultando API...' :
+                                        bulkActionType === 'quitar_bomcontrole' ? 'Quitando no BC...' :
+                                        bulkActionType === 'anexar_pdf_bomcontrole' ? 'Anexando PDF...' : 'Enviando...'
                                       )}
                                       {log.status === 'success' && (
                                         bulkActionType === 'gerar_boleto' ? '✓ Registrado' :
-                                        bulkActionType === 'consultar_api' ? '✓ Consultado' : '✓ Enviado'
+                                        bulkActionType === 'consultar_api' ? '✓ Consultado' :
+                                        bulkActionType === 'quitar_bomcontrole' ? '✓ Quitado no BC' :
+                                        bulkActionType === 'anexar_pdf_bomcontrole' ? '✓ Anexado no BC' : '✓ Enviado'
                                       )}
                                       {log.status === 'error' && `✗ Erro: ${log.error || 'Falha'}`}
                                     </span>
@@ -2961,6 +3173,28 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             >
                               <Search className="h-3.5 w-3.5 text-amber-100" />
                               Buscar Boleto / Consultar API de {numSelected} Faturas
+                            </button>
+                          )}
+
+                          {bulkActionType === 'quitar_bomcontrole' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBulkSend(false)}
+                              className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <CheckCircle className="h-3.5 w-3.5 text-emerald-100" />
+                              Efetuar Pagamento / Quitar {numSelected} Faturas no Bom Controle
+                            </button>
+                          )}
+
+                          {bulkActionType === 'anexar_pdf_bomcontrole' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBulkSend(false)}
+                              className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 text-blue-100" />
+                              Anexar PDF do Boleto em {numSelected} Faturas no Bom Controle
                             </button>
                           )}
                         </div>
@@ -3101,6 +3335,30 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             </button>
                           )}
                           
+                          <button
+                            type="button"
+                            onClick={() => handleQuitarBomControle(fetchedFatura)}
+                            disabled={quittingId === String(fetchedFatura.Id)}
+                            className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                            title="Efetuar pagamento e quitar fatura no Bom Controle"
+                          >
+                            <CheckCircle className={`h-3 w-3 ${quittingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                            {quittingId === String(fetchedFatura.Id) ? 'Quitando...' : 'Quitar no BC'}
+                          </button>
+
+                          {fetchedFatura.LinkBoleto && (
+                            <button
+                              type="button"
+                              onClick={() => handleAnexarBoletoBomControle(fetchedFatura)}
+                              disabled={attachingId === String(fetchedFatura.Id)}
+                              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                              title="Anexar boleto PDF na movimentação da fatura no Bom Controle"
+                            >
+                              <Paperclip className={`h-3 w-3 ${attachingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                              {attachingId === String(fetchedFatura.Id) ? 'Anexando...' : 'Anexar PDF no BC'}
+                            </button>
+                          )}
+
                           <select
                             value={bradescoEnvSelection}
                             onChange={(e) => setBradescoEnvSelection(e.target.value as any)}

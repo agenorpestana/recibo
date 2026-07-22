@@ -834,6 +834,202 @@ async function startServer() {
     }
   });
 
+  // Helper function to download PDF buffer from pdfUrl or visualizar-boleto link
+  async function fetchPdfBuffer(pdfUrl: string, req: express.Request): Promise<Buffer> {
+    let downloadUrl = pdfUrl;
+    let isMicrolink = false;
+    if (pdfUrl.includes('/api/integration/bradesco/visualizar-boleto')) {
+      isMicrolink = true;
+      let externalUrl = pdfUrl;
+      if (pdfUrl.includes('localhost') || pdfUrl.includes('127.0.0.1') || pdfUrl.startsWith('/')) {
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+        const host = req.get('host');
+        const idx = pdfUrl.indexOf('/api/integration/bradesco/visualizar-boleto');
+        const pathAndQuery = pdfUrl.substring(idx);
+        externalUrl = `${protocol}://${host}${pathAndQuery}`;
+      }
+      if (externalUrl.includes('?')) {
+        externalUrl += '&pdf=true';
+      } else {
+        externalUrl += '?pdf=true';
+      }
+      downloadUrl = `https://api.microlink.io/?url=${encodeURIComponent(externalUrl)}&pdf=true&meta=false&pdf.format=A4&viewport.width=794&viewport.height=1122&pdf.margin.top=0&pdf.margin.bottom=0&pdf.margin.left=0&pdf.margin.right=0`;
+    }
+
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      throw new Error(`Falha ao obter o PDF (HTTP ${response.status})`);
+    }
+
+    if (isMicrolink) {
+      const json: any = await response.json();
+      if (json.status === 'success' && json.data?.pdf?.url) {
+        const actualPdfUrl = json.data.pdf.url;
+        const actualPdfResponse = await fetch(actualPdfUrl);
+        if (actualPdfResponse.ok) {
+          const arrayBuffer = await actualPdfResponse.arrayBuffer();
+          return Buffer.from(arrayBuffer);
+        } else {
+          throw new Error(`Erro ao baixar PDF do CDN Microlink (HTTP ${actualPdfResponse.status})`);
+        }
+      } else {
+        throw new Error(`Microlink não retornou o PDF: ${json.message || 'Erro desconhecido'}`);
+      }
+    } else {
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    }
+  }
+
+  // PUT: Efetuar Pagamento da Fatura no Bom Controle
+  app.put('/api/integration/bom-controle/fatura/:id/efetuar-pagamento', async (req, res) => {
+    try {
+      const id = req.params.id;
+      let { valorLiquido, dataQuitacao, dataConciliacao, gerarResiduo } = req.body;
+
+      if (!id) {
+        return res.status(400).json({ error: 'ID da fatura é obrigatório.' });
+      }
+
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+
+      // Se valorLiquido não veio no body, busca no Bom Controle a fatura
+      if (valorLiquido === undefined || valorLiquido === null || valorLiquido === '') {
+        try {
+          const faturaRes = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/Obter/${id}`, {
+            headers: { 'Authorization': `ApiKey ${apiKey}` }
+          });
+          if (faturaRes.ok) {
+            const faturaData: any = await faturaRes.json();
+            valorLiquido = faturaData.ValorLiquido || faturaData.ValorTotal || faturaData.Valor || 0;
+          }
+        } catch (err) {
+          console.warn(`[Bom Controle API] Erro ao buscar valor da fatura #${id}:`, err);
+        }
+      }
+
+      if (!valorLiquido || Number(valorLiquido) <= 0) {
+        return res.status(400).json({ error: 'Valor líquido é obrigatório e deve ser maior que zero.' });
+      }
+
+      // Formata data YYYY-MM-DD HH:mm:ss se não informado
+      if (!dataQuitacao) {
+        const now = new Date();
+        const pad = (n: number) => String(n).padStart(2, '0');
+        dataQuitacao = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      }
+
+      const bodyPayload: any = {
+        ValorLiquido: Number(valorLiquido),
+        DataQuitacao: dataQuitacao,
+        GerarResiduo: Boolean(gerarResiduo)
+      };
+
+      if (dataConciliacao) {
+        bodyPayload.DataConciliacao = dataConciliacao;
+      }
+
+      const url = `https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/EfeturarPagamento/${id}`;
+      console.log(`[Bom Controle API] Efetuar Pagamento na fatura #${id}:`, bodyPayload);
+
+      const payRes = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(bodyPayload)
+      });
+
+      if (!payRes.ok) {
+        const errText = await payRes.text().catch(() => '');
+        console.error(`[Bom Controle API] Erro no pagamento da fatura #${id}: HTTP ${payRes.status} - ${errText}`);
+        return res.status(400).json({
+          error: `Erro ao quitar fatura no Bom Controle (HTTP ${payRes.status}): ${errText || payRes.statusText}`
+        });
+      }
+
+      // Salva no banco de dados local que está quitada
+      await db.saveBradescoBoletoStatus(String(id), true, 'QUITADA NO BOM CONTROLE', dataQuitacao);
+
+      res.json({
+        success: true,
+        message: `Pagamento efetuado com sucesso na Fatura #${id} do Bom Controle.`
+      });
+    } catch (e: any) {
+      console.error(`[Bom Controle API] Erro ao efetuar pagamento:`, e);
+      res.status(500).json({ error: e.message || 'Erro ao efetuar pagamento no Bom Controle.' });
+    }
+  });
+
+  // PUT: Upload Anexo (Boleto PDF) na Fatura no Bom Controle
+  app.put('/api/integration/bom-controle/fatura/:id/upload-anexo', async (req, res) => {
+    try {
+      const id = req.params.id;
+      let { pdfUrl, linkBoleto } = req.body;
+      let targetUrl = pdfUrl || linkBoleto;
+
+      if (!id) {
+        return res.status(400).json({ error: 'ID da fatura é obrigatório.' });
+      }
+
+      const settings = await db.getIntegrationSettings();
+      const apiKey = settings.bom_controle_api_key;
+      if (!apiKey) {
+        return res.status(400).json({ error: 'Chave de API do Bom Controle não configurada.' });
+      }
+
+      if (!targetUrl) {
+        const links = await db.getBradescoBoletosLinks([String(id)]);
+        if (links && links[String(id)]?.link) {
+          targetUrl = links[String(id)].link;
+        }
+      }
+
+      if (!targetUrl) {
+        return res.status(400).json({ error: 'Nenhum boleto ou PDF encontrado para esta fatura.' });
+      }
+
+      console.log(`[Bom Controle API] Baixando PDF para anexar à fatura #${id}: ${targetUrl}`);
+      const pdfBuffer = await fetchPdfBuffer(targetUrl, req);
+
+      const formData = new FormData();
+      const blob = new Blob([pdfBuffer], { type: 'application/pdf' });
+      formData.append('file', blob, `Boleto_Fatura_${id}.pdf`);
+
+      const uploadUrl = `https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/UploadAnexo?idFatura=${id}`;
+      console.log(`[Bom Controle API] Enviando upload em ${uploadUrl}`);
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `ApiKey ${apiKey}`
+        },
+        body: formData
+      });
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text().catch(() => '');
+        console.error(`[Bom Controle API] Erro no Upload Anexo da fatura #${id}: HTTP ${uploadRes.status} - ${errText}`);
+        return res.status(400).json({
+          error: `Erro ao enviar anexo no Bom Controle (HTTP ${uploadRes.status}): ${errText || uploadRes.statusText}`
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Boleto em PDF anexado com sucesso na Fatura #${id} do Bom Controle.`
+      });
+    } catch (e: any) {
+      console.error(`[Bom Controle API] Erro no upload do anexo:`, e);
+      res.status(500).json({ error: e.message || 'Erro ao anexar PDF no Bom Controle.' });
+    }
+  });
+
   // Envia mensagem via Whaticket
   app.post('/api/integration/whaticket/send', async (req, res) => {
     try {
@@ -1808,13 +2004,58 @@ async function startServer() {
           await db.saveBradescoBoletoStatus(idToSave, isQuitada, descStatus || cdStatus || 'REGISTRADO', dataMovimentacao);
         }
 
+        let bomControleQuitado = false;
+        let bomControleMessage = '';
+
+        if (isQuitada) {
+          const apiKey = settings.bom_controle_api_key;
+          if (apiKey) {
+            try {
+              const valorToPay = finalValor || fatura.ValorLiquido || fatura.ValorTotal || fatura.Valor || 0;
+              const now = new Date();
+              const pad = (n: number) => String(n).padStart(2, '0');
+              const dataQuit = dataMovimentacao && dataMovimentacao.length === 10
+                ? `${dataMovimentacao} 12:00:00`
+                : `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+              const bcRes = await fetch(`https://apinewintegracao.bomcontrole.com.br/integracao/Fatura/EfeturarPagamento/${faturaId}`, {
+                method: 'PUT',
+                headers: {
+                  'Authorization': `ApiKey ${apiKey}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  ValorLiquido: Number(valorToPay),
+                  DataQuitacao: dataQuit,
+                  GerarResiduo: false
+                })
+              });
+
+              if (bcRes.ok) {
+                bomControleQuitado = true;
+                bomControleMessage = 'Quitação sincronizada com sucesso no Bom Controle!';
+                console.log(`[Bom Controle API] Fatura #${faturaId} quitada com sucesso via retorno Bradesco.`);
+              } else {
+                const errBc = await bcRes.text().catch(() => '');
+                bomControleMessage = `Aviso: não foi possível quitar no Bom Controle: ${errBc}`;
+                console.warn(`[Bom Controle API] Falha ao auto-quitar fatura #${faturaId}:`, errBc);
+              }
+            } catch (errBc: any) {
+              bomControleMessage = `Falha ao conectar com Bom Controle: ${errBc.message}`;
+              console.error(`[Bom Controle API] Erro no auto-quitar:`, errBc);
+            }
+          }
+        }
+
         res.json({
           success: true,
           quitado: isQuitada,
           status: descStatus || cdStatus || 'REGISTRADO',
           dataMovimentacao,
           raw: queryRes,
-          linkBoleto: bradescoLink
+          linkBoleto: bradescoLink,
+          bomControleQuitado,
+          bomControleMessage
         });
 
       } catch (apiError: any) {
