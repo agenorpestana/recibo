@@ -2471,16 +2471,18 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                           <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
                                           {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
                                         </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleBaixarBoletoBradesco(f)}
-                                          disabled={cancellingBoletoId === String(f.Id)}
-                                          className="text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                          title="Baixar/Cancelar o boleto no Bradesco se pago por transferência ou outro meio"
-                                        >
-                                          <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(f.Id) ? 'animate-pulse' : ''}`} />
-                                          {cancellingBoletoId === String(f.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
-                                        </button>
+                                        {!f.Quitada && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleBaixarBoletoBradesco(f)}
+                                            disabled={cancellingBoletoId === String(f.Id)}
+                                            className="text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
+                                            title="Baixar/Cancelar o boleto no Bradesco se pago por transferência ou outro meio"
+                                          >
+                                            <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(f.Id) ? 'animate-pulse' : ''}`} />
+                                            {cancellingBoletoId === String(f.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
+                                          </button>
+                                        )}
                                       </>
                                     ) : (
                                       <button
@@ -2932,12 +2934,12 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             )}
                           </button>
 
-                          {fetchedFatura.LinkBoleto && (
+                          {fetchedFatura.LinkBoleto && !fetchedFatura.Quitada && (
                             <button
                               type="button"
                               onClick={() => handleBaixarBoletoBradesco(fetchedFatura)}
                               disabled={cancellingBoletoId === String(fetchedFatura.Id)}
-                              className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0"
+                              className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                               title="Baixar/Cancelar o boleto no Bradesco"
                             >
                               <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(fetchedFatura.Id) ? 'animate-pulse' : ''}`} />

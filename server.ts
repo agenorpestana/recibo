@@ -608,20 +608,26 @@ async function startServer() {
       });
 
       // Enriquecer com boletos Bradesco salvos localmente
-      const faturasIds = faturas.map((f: any) => f.Id).filter(Boolean);
-      const savedLinks = await db.getBradescoBoletosLinks(faturasIds);
+      const faturasIds: string[] = [];
+      faturas.forEach((f: any) => {
+        if (f.Id) faturasIds.push(String(f.Id));
+        if (f.IdFatura) faturasIds.push(String(f.IdFatura));
+        if (f.IdMovimentacaoFinanceiraParcela) faturasIds.push(String(f.IdMovimentacaoFinanceiraParcela));
+      });
+      const uniqueIds = Array.from(new Set(faturasIds));
+      const savedLinks = await db.getBradescoBoletosLinks(uniqueIds);
       
       const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
       const host = req.get('host');
 
       const enrichedFaturas = faturas.map((f: any) => {
-        const saved = savedLinks[String(f.Id)];
+        const saved = savedLinks[String(f.Id)] || (f.IdFatura && savedLinks[String(f.IdFatura)]) || (f.IdMovimentacaoFinanceiraParcela && savedLinks[String(f.IdMovimentacaoFinanceiraParcela)]);
         if (saved) {
           let absoluteLink = saved.link;
           if (saved.link && saved.link.startsWith('/')) {
             absoluteLink = `${protocol}://${host}${saved.link}`;
           }
-          const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1;
+          const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1 || saved.api_status === 'BAIXADO' || saved.api_status === 'LIQUIDADO' || saved.api_status === 'PAGO';
           return {
             ...f,
             LinkBoleto: absoluteLink || f.LinkBoleto,
@@ -1182,173 +1188,179 @@ async function startServer() {
         
         // Payload de Registro do Boleto Bradesco Oficial com QR Code (Formato Híbrido Real)
         const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '');
-        const nroCpfCnpjBenef = Number(cleanCnpj.substring(0, 8)) || 0;
+        const nroCpfCnpjBenef = cleanCnpj.substring(0, 8) || '07769477';
         const filCpfCnpjBenef = cleanCnpj.substring(8, 12) || '0001';
-        const digCpfCnpjBenef = Number(cleanCnpj.substring(12, 14)) || 0;
+        const digCpfCnpjBenef = cleanCnpj.substring(12, 14) || '85';
 
         const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
         const cleanAccount = account.split('-')[0].replace(/\D/g, '').padStart(7, '0');
         const cnegocCobr = `${cleanAgency}0000000${cleanAccount}`;
 
-        const cleanCep = pagadorCep.replace(/\D/g, '');
-        const ccepSacdoTitlo = Number(cleanCep.substring(0, 5)) || 0;
-        const ccomplCepSacdo = Number(cleanCep.substring(5, 8)) || 0;
+        const cleanCep = pagadorCep.replace(/\D/g, '').padStart(8, '0');
+        const ccepSacdoTitlo = cleanCep.substring(0, 5);
+        const ccomplCepSacdo = cleanCep.substring(5, 8);
 
         const docDigits = pagadorDoc.replace(/\D/g, '');
-        const nroCpfCnpjSacdo = Number(docDigits) || 0;
-        const indCpfCnpjSacdo = docDigits.length > 11 ? 2 : 1;
+        const indCpfCnpjSacdo = docDigits.length > 11 ? "2" : "1";
+        const nroCpfCnpjSacdo = docDigits.padStart(14, '0');
 
         const numMatch = pagadorEnd.match(/\d+/);
-        const enroLogdrSacdo = numMatch ? numMatch[0].substring(0, 10) : 'S/N';
+        const enroLogdrSacdo = numMatch ? numMatch[0].substring(0, 10) : '0';
 
-        // Cálculo de Juros, Multa e Desconto de acordo com as configurações da integração
-        let ptxJuroVcto = 0;
-        let vdiaJuroMora = 0;
-        let qdiaInicJuro = 0;
+        const cleanNossoNumero = nossoNumero.replace(/\D/g, '').padStart(11, '0');
 
-        if (settings.bradesco_juros_tipo === 'mensal') {
-          ptxJuroVcto = Math.round((settings.bradesco_juros_valor || 0) * 100000);
-          qdiaInicJuro = 1;
-        } else if (settings.bradesco_juros_tipo === 'diario') {
-          vdiaJuroMora = Math.round(valor * ((settings.bradesco_juros_valor || 0) / 100) * 100);
-          qdiaInicJuro = 1;
+        // Cálculo de Juros, Multa e Desconto de acordo com a documentação do Bradesco (Manual v1.0.3)
+        // Regra Bradesco: Apenas valor ou percentual, nunca ambos simultaneamente.
+        let ptxJuroVcto = "0";
+        let vdiaJuroMora = "0";
+        let qdiaInicJuro = "0";
+
+        if (settings.bradesco_juros_tipo === 'mensal' && Number(settings.bradesco_juros_valor) > 0) {
+          ptxJuroVcto = Number(settings.bradesco_juros_valor).toFixed(5);
+          qdiaInicJuro = "01";
+        } else if (settings.bradesco_juros_tipo === 'diario' && Number(settings.bradesco_juros_valor) > 0) {
+          const dailyCentavos = Math.round(valor * (Number(settings.bradesco_juros_valor) / 100) * 100);
+          vdiaJuroMora = String(dailyCentavos);
+          qdiaInicJuro = "01";
         }
 
-        let pmultaAplicVcto = 0;
-        let vmultaAtrsoPgto = 0;
-        let qdiaInicMulta = 0;
+        let pmultaAplicVcto = "0";
+        let vmultaAtrsoPgto = "0";
+        let qdiaInicMulta = "0";
 
-        if (settings.bradesco_multa_tipo === 'percentual') {
-          pmultaAplicVcto = Math.round((settings.bradesco_multa_valor || 0) * 100000);
-          qdiaInicMulta = 1;
-        } else if (settings.bradesco_multa_tipo === 'valor') {
-          vmultaAtrsoPgto = Math.round((settings.bradesco_multa_valor || 0) * 100);
-          qdiaInicMulta = 1;
+        if (settings.bradesco_multa_tipo === 'percentual' && Number(settings.bradesco_multa_valor) > 0) {
+          pmultaAplicVcto = Number(settings.bradesco_multa_valor).toFixed(5);
+          qdiaInicMulta = "01";
+        } else if (settings.bradesco_multa_tipo === 'valor' && Number(settings.bradesco_multa_valor) > 0) {
+          vmultaAtrsoPgto = String(Math.round(Number(settings.bradesco_multa_valor) * 100));
+          qdiaInicMulta = "01";
         }
 
-        let pdescBonifPgto01 = 0;
-        let vdescBonifPgto01 = 0;
+        let pdescBonifPgto01 = "0";
+        let vdescBonifPgto01 = "0";
         let dlimDescBonif1 = "";
+        let ctpoPrzCobr = "00";
 
-        if (settings.bradesco_desconto_tipo && settings.bradesco_desconto_tipo !== 'isento') {
-          const discountDays = settings.bradesco_desconto_dias || 0;
+        if (settings.bradesco_desconto_tipo && settings.bradesco_desconto_tipo !== 'isento' && Number(settings.bradesco_desconto_valor) > 0) {
+          const discountDays = Number(settings.bradesco_desconto_dias) || 0;
           const dueDate = new Date(vencimento + 'T12:00:00');
           dueDate.setDate(dueDate.getDate() - discountDays);
           dlimDescBonif1 = dueDate.toISOString().split('T')[0].split('-').reverse().join('.');
 
           if (settings.bradesco_desconto_tipo === 'percentual') {
-            pdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100000);
+            pdescBonifPgto01 = Number(settings.bradesco_desconto_valor).toFixed(5);
+            ctpoPrzCobr = "01";
           } else if (settings.bradesco_desconto_tipo === 'valor') {
-            vdescBonifPgto01 = Math.round((settings.bradesco_desconto_valor || 0) * 100);
+            vdescBonifPgto01 = String(Math.round(Number(settings.bradesco_desconto_valor) * 100));
+            ctpoPrzCobr = "01";
           }
         }
 
         const registerPayload = {
-          ctitloCobrCdent: Number(nossoNumero.replace(/\D/g, '')) || 0,
-          registrarTitulo: 1,
-          nroCpfCnpjBenef: nroCpfCnpjBenef,
+          ctitloCobrCdent: cleanNossoNumero,
+          registrarTitulo: "1",
+          qtdDecurPrz: "0",
           codUsuario: "APISERVIC",
+          nroCpfCnpjBenef: nroCpfCnpjBenef,
           filCpfCnpjBenef: filCpfCnpjBenef,
-          tipoAcesso: 2,
           digCpfCnpjBenef: digCpfCnpjBenef,
-          cpssoaJuridContr: "",
-          ctpoContrNegoc: "",
-          cidtfdProdCobr: Number(wallet) || 9,
-          nseqContrNegoc: "",
+          tipoAcesso: "2",
+          cpssoaJuridContr: "0",
+          ctpoContrNegoc: "000",
+          nseqContrNegoc: "0",
+          cidtfdProdCobr: wallet ? String(wallet).padStart(2, '0') : "09",
           cnegocCobr: cnegocCobr,
           filler: "",
-          eNseqContrNegoc: "",
-          tipoRegistro: 1,
-          codigoBanco: 237,
-          cprodtServcOper: "",
-          demisTitloCobr: emissao.split('-').reverse().join('.'),
+          codigoBanco: "237",
+          eNseqContrNegoc: "0",
+          tipoRegistro: "001",
+          cprodtServcOper: "00000000",
           ctitloCliCdent: String(faturaId).substring(0, 25),
+          demisTitloCobr: emissao.split('-').reverse().join('.'),
           dvctoTitloCobr: vencimento.split('-').reverse().join('.'),
-          cidtfdTpoVcto: "",
-          vnmnalTitloCobr: Math.round(valor * 100),
-          cindcdEconmMoeda: 9,
-          cespceTitloCobr: 2,
-          qmoedaNegocTitlo: 0,
-          ctpoProteTitlo: 0,
+          cidtfdTpoVcto: "0",
+          cindcdEconmMoeda: "6",
+          vnmnalTitloCobr: String(Math.round(valor * 100)),
+          qmoedaNegocTitlo: "0",
+          cespceTitloCobr: "02",
           cindcdAceitSacdo: "N",
-          ctpoPrzProte: 0,
-          ctpoPrzDecurs: 0,
-          ctpoProteDecurs: 0,
-          cctrlPartcTitlo: 0,
-          cindcdPgtoParcial: "N",
-          cformaEmisPplta: "02",
-          qtdePgtoParcial: 0,
-          qtdDecurPrz: "0",
           codNegativacao: "0",
           diasNegativacao: "0",
-          ptxJuroVcto: ptxJuroVcto,
+          ctpoProteTitlo: "00",
+          ctpoPrzProte: "00",
+          ctpoProteDecurs: "00",
+          ctpoPrzDecurs: "00",
+          cctrlPartcTitlo: "0",
+          cformaEmisPplta: "02",
+          cindcdPgtoParcial: "N",
+          qtdePgtoParcial: "000",
           filler1: "",
+          ptxJuroVcto: ptxJuroVcto,
           vdiaJuroMora: vdiaJuroMora,
-          pmultaAplicVcto: pmultaAplicVcto,
           qdiaInicJuro: qdiaInicJuro,
+          pmultaAplicVcto: pmultaAplicVcto,
           vmultaAtrsoPgto: vmultaAtrsoPgto,
-          pdescBonifPgto01: pdescBonifPgto01,
           qdiaInicMulta: qdiaInicMulta,
+          pdescBonifPgto01: pdescBonifPgto01,
           vdescBonifPgto01: vdescBonifPgto01,
-          pdescBonifPgto02: 0,
           dlimDescBonif1: dlimDescBonif1,
-          vdescBonifPgto02: 0,
-          pdescBonifPgto03: 0,
+          pdescBonifPgto02: "0",
+          vdescBonifPgto02: "0",
           dlimDescBonif2: "",
-          vdescBonifPgto03: 0,
-          ctpoPrzCobr: 0,
+          pdescBonifPgto03: "0",
+          vdescBonifPgto03: "0",
           dlimDescBonif3: "",
-          pdescBonifPgto: 0,
+          ctpoPrzCobr: ctpoPrzCobr,
+          pdescBonifPgto: "0",
+          vdescBonifPgto: "0000",
           dlimBonifPgto: "",
-          vdescBonifPgto: 0,
-          vabtmtTitloCobr: 0,
+          vabtmtTitloCobr: "00000000000000000",
+          viofPgtoTitlo: "0",
           filler2: "",
-          viofPgtoTitlo: 0,
           isacdoTitloCobr: pagadorNome.substring(0, 40),
-          enroLogdrSacdo: enroLogdrSacdo,
           elogdrSacdoTitlo: pagadorEnd.substring(0, 40),
+          enroLogdrSacdo: enroLogdrSacdo,
           ecomplLogdrSacdo: "",
           ccepSacdoTitlo: ccepSacdoTitlo,
-          ebairoLogdrSacdo: (pagadorObj.Bairro || pagadorObj.bairro || "Centro").substring(0, 40),
           ccomplCepSacdo: ccomplCepSacdo,
+          ebairoLogdrSacdo: (pagadorObj.Bairro || pagadorObj.bairro || "Centro").substring(0, 40),
           imunSacdoTitlo: (pagadorObj.Cidade || pagadorObj.cidade || "Itamaraju").substring(0, 30),
-          indCpfCnpjSacdo: indCpfCnpjSacdo,
           csglUfSacdo: (pagadorObj.Estado || pagadorObj.Uf || "BA").substring(0, 2),
-          renderEletrSacdo: "",
-          cdddFoneSacdo: 0,
+          indCpfCnpjSacdo: indCpfCnpjSacdo,
           nroCpfCnpjSacdo: nroCpfCnpjSacdo,
-          bancoDeb: 0,
-          cfoneSacdoTitlo: 0,
-          agenciaDebDv: 0,
-          agenciaDeb: 0,
-          bancoCentProt: 0,
-          contaDeb: 0,
+          renderEletrSacdo: "",
+          cdddFoneSacdo: "000",
+          cfoneSacdoTitlo: "0",
+          bancoDeb: "000",
+          agenciaDeb: "00000",
+          agenciaDebDv: "0",
+          contaDeb: "0000000000000",
+          bancoCentProt: "000",
+          agenciaDvCentPr: "00000",
           isacdrAvalsTitlo: "",
-          agenciaDvCentPr: 0,
-          enroLogdrSacdr: "0",
           elogdrSacdrAvals: "",
+          enroLogdrSacdr: "",
           ecomplLogdrSacdr: "",
-          ccomplCepSacdr: 0,
+          ccepSacdrTitlo: "00000",
+          ccomplCepSacdr: "000",
           ebairoLogdrSacdr: "",
-          csglUfSacdr: "",
-          ccepSacdrTitlo: 0,
           imunSacdrAvals: "",
-          indCpfCnpjSacdr: 0,
+          csglUfSacdr: "",
+          indCpfCnpjSacdr: "",
+          nroCpfCnpjSacdr: "00000000000000",
           renderEletrSacdr: "",
-          nroCpfCnpjSacdr: 0,
-          cdddFoneSacdr: 0,
-          filler3: "0",
-          cfoneSacdrTitlo: 0,
-          iconcPgtoSpi: "",
+          cdddFoneSacdr: "",
+          cfoneSacdrTitlo: "",
+          filler3: "",
           fase: "1",
           cindcdCobrMisto: "S",
           ialiasAdsaoCta: "",
-          ilinkGeracQrcd: "",
+          iconcPgtoSpi: "",
           caliasAdsaoCta: "",
+          ilinkGeracQrcd: "",
           wqrcdPdraoMercd: "",
-          validadeAposVencimento: "",
-          filler4: "",
-          idLoc: ""
+          validadeAposVencimento: "0",
+          filler4: ""
         };
 
         const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
@@ -1416,8 +1428,17 @@ async function startServer() {
         });
         const generatedLink = `/api/integration/bradesco/visualizar-boleto?${queryParamsForLink.toString()}`;
 
-        // Salvar o link do boleto no banco de dados local para persistência futura
-        await db.saveBradescoBoletoLink(faturaId, generatedLink, nossoNumero);
+        // Salvar o link do boleto no banco de dados local para persistência futura (para todas as variantes de ID da fatura)
+        const idsToSave = Array.from(new Set([
+          String(faturaId),
+          fatura?.Id ? String(fatura.Id) : null,
+          fatura?.IdFatura ? String(fatura.IdFatura) : null,
+          fatura?.IdMovimentacaoFinanceiraParcela ? String(fatura.IdMovimentacaoFinanceiraParcela) : null
+        ].filter(Boolean) as string[]));
+
+        for (const idToSave of idsToSave) {
+          await db.saveBradescoBoletoLink(idToSave, generatedLink, nossoNumero);
+        }
 
         return res.json({
           success: true,
@@ -1719,9 +1740,18 @@ async function startServer() {
         });
         const bradescoLink = `/api/integration/bradesco/visualizar-boleto?${queryParams.toString()}`;
 
-        // Salvar no banco de dados local para que o link fique persistido e seja resgatado no futuro
-        await db.saveBradescoBoletoLink(faturaId, bradescoLink, nossoNumero);
-        await db.saveBradescoBoletoStatus(faturaId, isQuitada, descStatus || cdStatus || 'REGISTRADO', dataMovimentacao);
+        // Salvar no banco de dados local para que o link fique persistido e seja resgatado no futuro (para todas as variantes de ID)
+        const idsToSave = Array.from(new Set([
+          String(faturaId),
+          fatura?.Id ? String(fatura.Id) : null,
+          fatura?.IdFatura ? String(fatura.IdFatura) : null,
+          fatura?.IdMovimentacaoFinanceiraParcela ? String(fatura.IdMovimentacaoFinanceiraParcela) : null
+        ].filter(Boolean) as string[]));
+
+        for (const idToSave of idsToSave) {
+          await db.saveBradescoBoletoLink(idToSave, bradescoLink, nossoNumero);
+          await db.saveBradescoBoletoStatus(idToSave, isQuitada, descStatus || cdStatus || 'REGISTRADO', dataMovimentacao);
+        }
 
         res.json({
           success: true,
@@ -1835,26 +1865,30 @@ async function startServer() {
           }
 
           const registerHost = isProduction ? 'openapi.bradesco.com.br' : 'openapisandbox.prebanco.com.br';
-          const registerPath = '/boleto-hibrido/cobranca-registro/v1/baixarBoleto';
+          const registerPath = '/boleto/cobranca-baixa/v1/baixar';
 
           const cleanAgency = agency.replace(/\D/g, '').padStart(4, '0');
           const cleanAccount = account.split('-')[0].replace(/\D/g, '').padStart(7, '0');
           const cleanWallet = wallet.replace(/\D/g, '').padStart(2, '0');
           const cleanCnpj = cnpjBeneficiario.replace(/\D/g, '').padStart(14, '0');
+          const cleanNossoNumero = Number(String(nossoNumero).replace(/\D/g, '')) || 0;
 
           const isCnpj = cleanCnpj.length > 11;
-          const cpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(0, 8)) : Number(cleanCnpj.substring(0, 9));
-          const filialCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(8, 12)) : 0;
-          const controleCpfCnpjUsuario = isCnpj ? Number(cleanCnpj.substring(12, 14)) : Number(cleanCnpj.substring(9, 11));
+          const cpfCnpj = isCnpj ? Number(cleanCnpj.substring(0, 8)) : Number(cleanCnpj.substring(0, 9));
+          const filial = isCnpj ? Number(cleanCnpj.substring(8, 12)) : 0;
+          const controle = isCnpj ? Number(cleanCnpj.substring(12, 14)) : Number(cleanCnpj.substring(9, 11));
 
           const baixarPayload = {
-            cpfCnpjUsuario: cpfCnpjUsuario,
-            filialCnpjUsuario: filialCnpjUsuario,
-            controleCpfCnpjUsuario: controleCpfCnpjUsuario,
-            idProduto: Number(cleanWallet) || 9,
-            contaProduto: Number(`${cleanAgency}${cleanAccount}`),
-            nomePersonalizado: 'bradesco',
-            nossoNumero: Number(nossoNumero)
+            cpfCnpj: {
+              cpfCnpj,
+              filial,
+              controle
+            },
+            produto: Number(cleanWallet) || 9,
+            negociacao: Number(`${cleanAgency}${cleanAccount}`),
+            nossoNumero: cleanNossoNumero,
+            sequencia: 0,
+            codigoBaixa: 57
           };
 
           console.log(`[Bradesco API Baixar] Enviando payload para baixarBoleto:`, baixarPayload);
@@ -1916,7 +1950,16 @@ async function startServer() {
       }
 
       if (apiSuccess) {
-        await db.saveBradescoBoletoStatus(faturaId, true, 'BAIXADO', new Date().toISOString().split('T')[0]);
+        const idsToSave = Array.from(new Set([
+          String(faturaId),
+          req.body?.fatura?.Id ? String(req.body.fatura.Id) : null,
+          req.body?.fatura?.IdFatura ? String(req.body.fatura.IdFatura) : null,
+          req.body?.fatura?.IdMovimentacaoFinanceiraParcela ? String(req.body.fatura.IdMovimentacaoFinanceiraParcela) : null
+        ].filter(Boolean) as string[]));
+
+        for (const idToSave of idsToSave) {
+          await db.saveBradescoBoletoStatus(idToSave, true, 'BAIXADO', new Date().toISOString().split('T')[0]);
+        }
         return res.json({
           success: true,
           mocked: !clientId || !certContent,
