@@ -685,7 +685,13 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
         if (fetchedFatura && String(fetchedFatura.Id) === faturaId) {
           setFetchedFatura((prev: any) => {
             if (!prev) return null;
-            const updated = { ...prev, Quitada: data.quitado };
+            const updated = { 
+              ...prev, 
+              Quitada: prev.Quitada || data.quitado,
+              ApiQuitado: data.quitado,
+              ApiStatus: data.status,
+              ApiDataMovimentacao: data.dataMovimentacao
+            };
             if (data.linkBoleto) {
               updated.LinkBoleto = data.linkBoleto;
               updated.IsBradescoBoleto = true;
@@ -699,7 +705,13 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
           if (!prevList) return null;
           return prevList.map((f: any) => {
             if (String(f.Id) === faturaId) {
-              const updated = { ...f, Quitada: data.quitado };
+              const updated = { 
+                ...f, 
+                Quitada: f.Quitada || data.quitado,
+                ApiQuitado: data.quitado,
+                ApiStatus: data.status,
+                ApiDataMovimentacao: data.dataMovimentacao
+              };
               if (data.linkBoleto) {
                 updated.LinkBoleto = data.linkBoleto;
                 updated.IsBradescoBoleto = true;

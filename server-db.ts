@@ -2101,11 +2101,12 @@ class Database {
       if (!this.schema.bradesco_boletos_links) return result;
       for (const item of this.schema.bradesco_boletos_links) {
         if (stringIds.includes(item.fatura_id)) {
+          const isQ = item.api_quitado === true || (item.api_quitado as any) === 1 || String(item.api_quitado) === '1' || String(item.api_quitado) === 'true';
           result[item.fatura_id] = {
             link: item.link_boleto,
             nossonumero: item.nosso_numero,
             nosso_numero: item.nosso_numero,
-            api_quitado: item.api_quitado,
+            api_quitado: isQ,
             api_status: item.api_status,
             api_data_movimentacao: item.api_data_movimentacao
           };
@@ -2117,11 +2118,12 @@ class Database {
     try {
       const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [[stringIds]]);
       for (const row of rows) {
+        const isQ = row.api_quitado === 1 || row.api_quitado === true || String(row.api_quitado) === '1' || String(row.api_quitado) === 'true';
         result[row.fatura_id] = {
           link: row.link_boleto,
           nossonumero: row.nosso_numero,
           nosso_numero: row.nosso_numero,
-          api_quitado: row.api_quitado === 1 || row.api_quitado === true,
+          api_quitado: isQ,
           api_status: row.api_status,
           api_data_movimentacao: row.api_data_movimentacao
         };

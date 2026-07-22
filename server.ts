@@ -495,8 +495,15 @@ async function startServer() {
       // Enriquecer com dados do cliente e da empresa
       const enriched = await enrichFatura(data, apiKey);
 
-      const savedLinks = await db.getBradescoBoletosLinks([id]);
-      const saved = savedLinks[String(id)];
+      const possibleIds = Array.from(new Set([
+        String(id),
+        data?.Id ? String(data.Id) : null,
+        data?.IdFatura ? String(data.IdFatura) : null,
+        data?.IdMovimentacaoFinanceiraParcela ? String(data.IdMovimentacaoFinanceiraParcela) : null
+      ].filter(Boolean) as string[]));
+
+      const savedLinks = await db.getBradescoBoletosLinks(possibleIds);
+      const saved = possibleIds.map(i => savedLinks[i]).find(Boolean);
       if (saved) {
         if (saved.link) {
           if (saved.link.startsWith('/')) {
@@ -509,7 +516,22 @@ async function startServer() {
         }
         enriched.IsBradescoBoleto = true;
         enriched.NossoNumeroBradesco = saved.nosso_numero || saved.nossonumero;
-        const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1;
+        
+        const isApiQuitada = !!(
+          saved.api_quitado === true || 
+          (saved.api_quitado as any) === 1 || 
+          String(saved.api_quitado) === '1' || 
+          String(saved.api_quitado) === 'true' ||
+          (saved.api_status && (
+            saved.api_status.toUpperCase().includes('BAIXAD') || 
+            saved.api_status.toUpperCase().includes('LIQUIDAD') || 
+            saved.api_status.toUpperCase().includes('PAGO') || 
+            saved.api_status.toUpperCase().includes('ACERTO') || 
+            saved.api_status.toUpperCase().includes('QUITAD') ||
+            ['13', '30', '51', '61', '62', '67', '69', '57'].includes(String(saved.api_status))
+          ))
+        );
+
         enriched.Quitada = enriched.Quitada || isApiQuitada;
         enriched.ApiQuitado = isApiQuitada;
         enriched.ApiStatus = saved.api_status;
@@ -627,7 +649,20 @@ async function startServer() {
           if (saved.link && saved.link.startsWith('/')) {
             absoluteLink = `${protocol}://${host}${saved.link}`;
           }
-          const isApiQuitada = saved.api_quitado === true || (saved.api_quitado as any) === 1 || saved.api_status === 'BAIXADO' || saved.api_status === 'LIQUIDADO' || saved.api_status === 'PAGO';
+          const isApiQuitada = !!(
+            saved.api_quitado === true || 
+            (saved.api_quitado as any) === 1 || 
+            String(saved.api_quitado) === '1' || 
+            String(saved.api_quitado) === 'true' ||
+            (saved.api_status && (
+              saved.api_status.toUpperCase().includes('BAIXAD') || 
+              saved.api_status.toUpperCase().includes('LIQUIDAD') || 
+              saved.api_status.toUpperCase().includes('PAGO') || 
+              saved.api_status.toUpperCase().includes('ACERTO') || 
+              saved.api_status.toUpperCase().includes('QUITAD') ||
+              ['13', '30', '51', '61', '62', '67', '69', '57'].includes(String(saved.api_status))
+            ))
+          );
           return {
             ...f,
             LinkBoleto: absoluteLink || f.LinkBoleto,
@@ -1668,13 +1703,15 @@ async function startServer() {
         const upperDesc = String(descStatus).toUpperCase();
         const strCdStatus = String(cdStatus);
         
-        // Mapeia os status de liquidação/pagamento oficiais (e.g. 13=PAGO NO DIA, 61=PAGO, etc.)
+        // Mapeia os status de liquidação/pagamento oficiais (e.g. 13=PAGO NO DIA, 51=POR ACERTO, 61=PAGO, etc.)
         if (
           upperDesc.includes('PAGO') || 
           upperDesc.includes('LIQUIDADO') || 
           upperDesc.includes('BAIXA') || 
-          ['13', '30', '51', '61', '62', '67', '69'].includes(strCdStatus) ||
-          strCdStatus === '13' || strCdStatus === '61' || strCdStatus === '62'
+          upperDesc.includes('ACERTO') || 
+          upperDesc.includes('QUITAD') || 
+          ['13', '30', '51', '61', '62', '67', '69', '57'].includes(strCdStatus) ||
+          strCdStatus === '13' || strCdStatus === '61' || strCdStatus === '62' || strCdStatus === '51'
         ) {
           isQuitada = true;
         }
