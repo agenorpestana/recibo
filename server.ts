@@ -607,8 +607,9 @@ async function startServer() {
 
       // Mapeia os itens (parcelas financeiras) para o formato esperado pelo frontend
       const faturas = itemsList.map((item: any) => {
+        const primaryId = item.IdFatura || item.IdMovimentacaoFinanceiraParcela || item.Id || item.IdMovimentacao;
         return {
-          Id: item.IdFatura || item.IdMovimentacaoFinanceiraParcela, // Prefere o ID da Fatura para poder buscar o Obter completo
+          Id: primaryId,
           IdFatura: item.IdFatura,
           IdMovimentacaoFinanceiraParcela: item.IdMovimentacaoFinanceiraParcela,
           NomeCliente: item.NomeClienteFornecedor || item.Nome,
@@ -631,6 +632,12 @@ async function startServer() {
 
       // Enriquecer com boletos Bradesco salvos localmente
       const faturasIds: string[] = [];
+      itemsList.forEach((item: any) => {
+        if (item.Id) faturasIds.push(String(item.Id));
+        if (item.IdFatura) faturasIds.push(String(item.IdFatura));
+        if (item.IdMovimentacaoFinanceiraParcela) faturasIds.push(String(item.IdMovimentacaoFinanceiraParcela));
+        if (item.IdMovimentacao) faturasIds.push(String(item.IdMovimentacao));
+      });
       faturas.forEach((f: any) => {
         if (f.Id) faturasIds.push(String(f.Id));
         if (f.IdFatura) faturasIds.push(String(f.IdFatura));
@@ -642,8 +649,19 @@ async function startServer() {
       const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
       const host = req.get('host');
 
-      const enrichedFaturas = faturas.map((f: any) => {
-        const saved = savedLinks[String(f.Id)] || (f.IdFatura && savedLinks[String(f.IdFatura)]) || (f.IdMovimentacaoFinanceiraParcela && savedLinks[String(f.IdMovimentacaoFinanceiraParcela)]);
+      const enrichedFaturas = faturas.map((f: any, idx: number) => {
+        const rawItem = itemsList[idx] || {};
+        const possibleKeys = Array.from(new Set([
+          f.Id ? String(f.Id) : null,
+          f.IdFatura ? String(f.IdFatura) : null,
+          f.IdMovimentacaoFinanceiraParcela ? String(f.IdMovimentacaoFinanceiraParcela) : null,
+          rawItem.Id ? String(rawItem.Id) : null,
+          rawItem.IdFatura ? String(rawItem.IdFatura) : null,
+          rawItem.IdMovimentacaoFinanceiraParcela ? String(rawItem.IdMovimentacaoFinanceiraParcela) : null,
+          rawItem.IdMovimentacao ? String(rawItem.IdMovimentacao) : null
+        ].filter(Boolean) as string[]));
+
+        const saved = possibleKeys.map(k => savedLinks[k]).find(Boolean);
         if (saved) {
           let absoluteLink = saved.link;
           if (saved.link && saved.link.startsWith('/')) {

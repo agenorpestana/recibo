@@ -2122,10 +2122,11 @@ class Database {
     }
 
     try {
-      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [[stringIds]]);
+      const [rows]: any = await pool.query('SELECT fatura_id, link_boleto, nosso_numero, api_quitado, api_status, api_data_movimentacao FROM bradesco_boletos_links WHERE fatura_id IN (?)', [stringIds]);
       for (const row of rows) {
         const isQ = row.api_quitado === 1 || row.api_quitado === true || String(row.api_quitado) === '1' || String(row.api_quitado) === 'true';
-        result[row.fatura_id] = {
+        const key = String(row.fatura_id);
+        result[key] = {
           link: row.link_boleto,
           nossonumero: row.nosso_numero,
           nosso_numero: row.nosso_numero,
