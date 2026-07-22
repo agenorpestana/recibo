@@ -109,7 +109,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
   const [bulkDelay, setBulkDelay] = useState(10);
   const [bulkLogs, setBulkLogs] = useState<{ id: string; name: string; status: 'pending' | 'loading' | 'sending' | 'success' | 'error'; error?: string }[]>([]);
   const [bulkSendAsMedia, setBulkSendAsMedia] = useState(true);
-  const [bulkActionType, setBulkActionType] = useState<'whatsapp' | 'email' | 'gerar_boleto'>('whatsapp');
+  const [bulkActionType, setBulkActionType] = useState<'whatsapp' | 'email' | 'gerar_boleto' | 'consultar_api'>('whatsapp');
   const bulkCancelledRef = React.useRef(false);
 
   // Dynamic companies list
@@ -1172,6 +1172,81 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
             });
           } else {
             throw new Error(regData.error || 'Erro desconhecido ao registrar boleto Bradesco.');
+          }
+        } else if (bulkActionType === 'consultar_api') {
+          setBulkLogs(prev => prev.map(log => log.id === itemId ? { ...log, status: 'sending' as const } : log));
+
+          const checkRes = await fetch('/api/integration/bradesco/consultar-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fatura: data,
+              envSelection: bradescoEnvSelection
+            })
+          });
+
+          if (!checkRes.ok) {
+            const errData = await checkRes.json().catch(() => ({}));
+            throw new Error(errData.error || `Erro HTTP ${checkRes.status} na consulta`);
+          }
+
+          const checkData = await checkRes.json();
+          if (checkData.success) {
+            const faturaId = itemId;
+
+            // Atualiza status local
+            setStatusCheckResults(prev => ({
+              ...prev,
+              [faturaId]: {
+                quitado: checkData.quitado,
+                status: checkData.status,
+                dataMovimentacao: checkData.dataMovimentacao,
+                message: checkData.message || 'Consulta realizada com sucesso.'
+              }
+            }));
+
+            // Se a fatura ativa no painel for essa, atualiza
+            if (fetchedFatura && String(fetchedFatura.Id) === faturaId) {
+              setFetchedFatura((prev: any) => {
+                if (!prev) return null;
+                const updated = {
+                  ...prev,
+                  Quitada: prev.Quitada || checkData.quitado,
+                  ApiQuitado: checkData.quitado,
+                  ApiStatus: checkData.status,
+                  ApiDataMovimentacao: checkData.dataMovimentacao
+                };
+                if (checkData.linkBoleto) {
+                  updated.LinkBoleto = checkData.linkBoleto;
+                  updated.IsBradescoBoleto = true;
+                }
+                return updated;
+              });
+            }
+
+            // Atualiza na faturasList
+            setFaturasList((prevList) => {
+              if (!prevList) return null;
+              return prevList.map((f: any) => {
+                if (String(f.Id) === faturaId) {
+                  const updated = {
+                    ...f,
+                    Quitada: f.Quitada || checkData.quitado,
+                    ApiQuitado: checkData.quitado,
+                    ApiStatus: checkData.status,
+                    ApiDataMovimentacao: checkData.dataMovimentacao
+                  };
+                  if (checkData.linkBoleto) {
+                    updated.LinkBoleto = checkData.linkBoleto;
+                    updated.IsBradescoBoleto = true;
+                  }
+                  return updated;
+                }
+                return f;
+              });
+            });
+          } else {
+            throw new Error(checkData.error || 'Erro ao consultar status da fatura.');
           }
         }
 
@@ -2568,7 +2643,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         <div className="flex items-center gap-2">
                           <Send className="h-4 w-4 text-indigo-600" />
                           <h4 className="text-xs font-extrabold text-indigo-900 uppercase tracking-wider">
-                            Painel de Disparo em Massa
+                            Painel de Ações em Massa
                           </h4>
                         </div>
                         <span className="px-2 py-0.5 bg-indigo-200 text-indigo-800 text-[10px] font-extrabold rounded-full">
@@ -2578,7 +2653,7 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
 
                       {/* Seleção do Canal de Envio em Massa */}
                       {!bulkSending && (
-                        <div className="grid grid-cols-3 gap-1 bg-gray-100 p-1 rounded-lg">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-gray-100 p-1 rounded-lg">
                           <button
                             type="button"
                             onClick={() => setBulkActionType('whatsapp')}
@@ -2610,7 +2685,18 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                 : 'text-gray-500 hover:text-gray-800'
                             }`}
                           >
-                            Gerar Boletos Bradesco
+                            Gerar Boletos
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setBulkActionType('consultar_api')}
+                            className={`py-1.5 text-[10px] font-bold rounded-md transition-colors ${
+                              bulkActionType === 'consultar_api'
+                                ? 'bg-white text-amber-700 shadow-xs font-extrabold'
+                                : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            Buscar / Consultar API
                           </button>
                         </div>
                       )}
@@ -2720,6 +2806,45 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                         </div>
                       )}
 
+                      {bulkActionType === 'consultar_api' && (
+                        <div className="bg-white/80 p-3 rounded-lg border border-amber-100/60 text-xs text-gray-600 space-y-2">
+                          <span className="font-bold text-amber-800 uppercase block text-[9px] tracking-wide flex items-center gap-1">
+                            <Search className="h-3 w-3 text-amber-600" />
+                            Busca e Consulta de API Bradesco em Massa:
+                          </span>
+                          <p className="text-[10px] text-gray-500">
+                            O sistema irá consultar a API do Bradesco para cada uma das {numSelected} faturas selecionadas, verificando o status de pagamento (Quitado / Baixado / Pendente) e localizando/armazenando o link dos boletos registrados.
+                          </p>
+                          <div className="flex items-center gap-3 bg-amber-50/50 p-2 rounded-md border border-amber-100">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase shrink-0">Ambiente Bradesco:</span>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="bulk_bradesco_env"
+                                  checked={bradescoEnvSelection === 'sandbox'}
+                                  onChange={() => setBradescoEnvSelection('sandbox')}
+                                  disabled={bulkSending}
+                                  className="text-amber-500 focus:ring-amber-400"
+                                />
+                                <span className="text-[10px] font-bold text-gray-700">Homologação (Sandbox)</span>
+                              </label>
+                              <label className="flex items-center gap-1 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="bulk_bradesco_env"
+                                  checked={bradescoEnvSelection === 'production'}
+                                  onChange={() => setBradescoEnvSelection('production')}
+                                  disabled={bulkSending}
+                                  className="text-amber-500 focus:ring-amber-400"
+                                />
+                                <span className="text-[10px] font-bold text-gray-700">Produção</span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Progresso e Controles durante Envio */}
                       {bulkSending && (
                         <div className="space-y-3.5 bg-white p-3 rounded-xl border border-indigo-150 shadow-xs">
@@ -2763,8 +2888,14 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                     <span className={`shrink-0 uppercase ${statusColors[log.status]}`}>
                                       {log.status === 'pending' && 'Aguardando'}
                                       {log.status === 'loading' && 'Consultando Cliente'}
-                                      {log.status === 'sending' && (bulkActionType === 'gerar_boleto' ? 'Registrando...' : 'Enviando...')}
-                                      {log.status === 'success' && (bulkActionType === 'gerar_boleto' ? '✓ Registrado' : '✓ Enviado')}
+                                      {log.status === 'sending' && (
+                                        bulkActionType === 'gerar_boleto' ? 'Registrando...' :
+                                        bulkActionType === 'consultar_api' ? 'Consultando API...' : 'Enviando...'
+                                      )}
+                                      {log.status === 'success' && (
+                                        bulkActionType === 'gerar_boleto' ? '✓ Registrado' :
+                                        bulkActionType === 'consultar_api' ? '✓ Consultado' : '✓ Enviado'
+                                      )}
                                       {log.status === 'error' && `✗ Erro: ${log.error || 'Falha'}`}
                                     </span>
                                   </div>
@@ -2815,10 +2946,21 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             <button
                               type="button"
                               onClick={() => handleStartBulkSend(false)}
-                              className="w-full px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5"
+                              className="w-full px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
                             >
                               <CreditCard className="h-3.5 w-3.5 text-orange-100" />
                               Registrar {numSelected} Boletos no Bradesco via API
+                            </button>
+                          )}
+
+                          {bulkActionType === 'consultar_api' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartBulkSend(false)}
+                              className="w-full px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <Search className="h-3.5 w-3.5 text-amber-100" />
+                              Buscar Boleto / Consultar API de {numSelected} Faturas
                             </button>
                           )}
                         </div>
