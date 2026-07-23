@@ -2690,22 +2690,20 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                           type="button"
                                           onClick={() => handleConsultarStatusBradesco(f)}
                                           disabled={checkingStatusId === String(f.Id)}
-                                          className="text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                          title="Consultar status de pagamento no Bradesco"
+                                          className="text-indigo-600 hover:text-indigo-800 p-1 rounded hover:bg-indigo-50 transition-colors cursor-pointer disabled:opacity-50"
+                                          title={checkingStatusId === String(f.Id) ? "Consultando status no Bradesco..." : "Consultar API - Status de pagamento no Bradesco"}
                                         >
-                                          <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                          {checkingStatusId === String(f.Id) ? 'Consultando...' : 'Consultar API'}
+                                          <RefreshCw className={`h-3.5 w-3.5 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
                                         </button>
                                         {!(f.Quitada || f.ApiQuitado) && (
                                           <button
                                             type="button"
                                             onClick={() => handleBaixarBoletoBradesco(f)}
                                             disabled={cancellingBoletoId === String(f.Id)}
-                                            className="text-red-600 hover:text-red-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                            title="Baixar/Cancelar o boleto no Bradesco se pago por transferência ou outro meio"
+                                            className="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors cursor-pointer disabled:opacity-50"
+                                            title={cancellingBoletoId === String(f.Id) ? "Baixando/Cancelando boleto..." : "Baixar/Cancelar boleto no Bradesco"}
                                           >
-                                            <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(f.Id) ? 'animate-pulse' : ''}`} />
-                                            {cancellingBoletoId === String(f.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
+                                            <XCircle className={`h-3.5 w-3.5 ${cancellingBoletoId === String(f.Id) ? 'animate-pulse' : ''}`} />
                                           </button>
                                         )}
                                       </>
@@ -2714,35 +2712,34 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                                         type="button"
                                         onClick={() => handleConsultarStatusBradesco(f)}
                                         disabled={checkingStatusId === String(f.Id)}
-                                        className="text-amber-600 hover:text-amber-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                        title="Buscar e carregar o boleto já registrado no Bradesco"
+                                        className="text-amber-600 hover:text-amber-800 p-1 rounded hover:bg-amber-50 transition-colors cursor-pointer disabled:opacity-50"
+                                        title={checkingStatusId === String(f.Id) ? "Buscando boleto no Bradesco..." : "Buscar e carregar boleto já registrado no Bradesco"}
                                       >
-                                        <Search className={`h-3 w-3 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                        {checkingStatusId === String(f.Id) ? 'Buscando...' : 'Buscar Boleto'}
+                                        <Search className={`h-3.5 w-3.5 ${checkingStatusId === String(f.Id) ? 'animate-spin' : ''}`} />
                                       </button>
                                     )}
 
-                                    <button
-                                      type="button"
-                                      onClick={() => handleQuitarBomControle(f)}
-                                      disabled={quittingId === String(f.Id)}
-                                      className="text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                      title="Efetuar Pagamento e quitar fatura no Bom Controle"
-                                    >
-                                      <CheckCircle className={`h-3 w-3 ${quittingId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                      {quittingId === String(f.Id) ? 'Quitando...' : 'Quitar no BC'}
-                                    </button>
+                                    {((f.Quitada || f.ApiQuitado || statusCheckResults[String(f.Id)]?.quitado) || !f.LinkBoleto) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuitarBomControle(f)}
+                                        disabled={quittingId === String(f.Id)}
+                                        className="text-emerald-600 hover:text-emerald-800 p-1 rounded hover:bg-emerald-50 transition-colors cursor-pointer disabled:opacity-50"
+                                        title={quittingId === String(f.Id) ? "Quitando no Bom Controle..." : "Quitar no BC - Efetuar pagamento no Bom Controle"}
+                                      >
+                                        <CheckCircle className={`h-3.5 w-3.5 ${quittingId === String(f.Id) ? 'animate-spin' : ''}`} />
+                                      </button>
+                                    )}
 
                                     {f.LinkBoleto && (
                                       <button
                                         type="button"
                                         onClick={() => handleAnexarBoletoBomControle(f)}
                                         disabled={attachingId === String(f.Id)}
-                                        className="text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5 hover:underline ml-1 cursor-pointer"
-                                        title="Fazer upload do boleto PDF como anexo na fatura do Bom Controle"
+                                        className="text-blue-600 hover:text-blue-800 p-1 rounded hover:bg-blue-50 transition-colors cursor-pointer disabled:opacity-50"
+                                        title={attachingId === String(f.Id) ? "Anexando PDF no Bom Controle..." : "Anexar PDF no BC - Upload do boleto no Bom Controle"}
                                       >
-                                        <Paperclip className={`h-3 w-3 ${attachingId === String(f.Id) ? 'animate-spin' : ''}`} />
-                                        {attachingId === String(f.Id) ? 'Anexando...' : 'Anexar PDF no BC'}
+                                        <Paperclip className={`h-3.5 w-3.5 ${attachingId === String(f.Id) ? 'animate-spin' : ''}`} />
                                       </button>
                                     )}
                                     {(() => {
@@ -3306,19 +3303,17 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                             type="button"
                             onClick={() => handleConsultarStatusBradesco(fetchedFatura)}
                             disabled={checkingStatusId === String(fetchedFatura.Id)}
-                            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0"
-                            title="Consultar status ou buscar boleto registrado na API Bradesco"
+                            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white p-1.5 rounded transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                            title={
+                              checkingStatusId === String(fetchedFatura.Id) 
+                                ? "Consultando API Bradesco..." 
+                                : (fetchedFatura.LinkBoleto ? "Consultar API - Status de pagamento no Bradesco" : "Buscar e carregar boleto registrado na API Bradesco")
+                            }
                           >
                             {fetchedFatura.LinkBoleto ? (
-                              <>
-                                <RefreshCw className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
-                                {checkingStatusId === String(fetchedFatura.Id) ? 'Verificando...' : 'Consultar Status'}
-                              </>
+                              <RefreshCw className={`h-3.5 w-3.5 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
                             ) : (
-                              <>
-                                <Search className={`h-3 w-3 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
-                                {checkingStatusId === String(fetchedFatura.Id) ? 'Buscando...' : 'Buscar Boleto Gerado'}
-                              </>
+                              <Search className={`h-3.5 w-3.5 ${checkingStatusId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
                             )}
                           </button>
 
@@ -3327,35 +3322,34 @@ export const CompanySettingsTab: React.FC<CompanySettingsTabProps> = ({ settings
                               type="button"
                               onClick={() => handleBaixarBoletoBradesco(fetchedFatura)}
                               disabled={cancellingBoletoId === String(fetchedFatura.Id)}
-                              className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-                              title="Baixar/Cancelar o boleto no Bradesco"
+                              className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white p-1.5 rounded transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                              title={cancellingBoletoId === String(fetchedFatura.Id) ? "Baixando/Cancelando boleto..." : "Baixar/Cancelar boleto no Bradesco"}
                             >
-                              <XCircle className={`h-3 w-3 ${cancellingBoletoId === String(fetchedFatura.Id) ? 'animate-pulse' : ''}`} />
-                              {cancellingBoletoId === String(fetchedFatura.Id) ? 'Baixando...' : 'Baixar/Cancelar'}
+                              <XCircle className={`h-3.5 w-3.5 ${cancellingBoletoId === String(fetchedFatura.Id) ? 'animate-pulse' : ''}`} />
                             </button>
                           )}
                           
-                          <button
-                            type="button"
-                            onClick={() => handleQuitarBomControle(fetchedFatura)}
-                            disabled={quittingId === String(fetchedFatura.Id)}
-                            className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-                            title="Efetuar pagamento e quitar fatura no Bom Controle"
-                          >
-                            <CheckCircle className={`h-3 w-3 ${quittingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
-                            {quittingId === String(fetchedFatura.Id) ? 'Quitando...' : 'Quitar no BC'}
-                          </button>
+                          {((fetchedFatura.Quitada || fetchedFatura.ApiQuitado || statusCheckResults[String(fetchedFatura.Id)]?.quitado) || !fetchedFatura.LinkBoleto) && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuitarBomControle(fetchedFatura)}
+                              disabled={quittingId === String(fetchedFatura.Id)}
+                              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white p-1.5 rounded transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                              title={quittingId === String(fetchedFatura.Id) ? "Quitando no Bom Controle..." : "Quitar no BC - Efetuar pagamento no Bom Controle"}
+                            >
+                              <CheckCircle className={`h-3.5 w-3.5 ${quittingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
+                            </button>
+                          )}
 
                           {fetchedFatura.LinkBoleto && (
                             <button
                               type="button"
                               onClick={() => handleAnexarBoletoBomControle(fetchedFatura)}
                               disabled={attachingId === String(fetchedFatura.Id)}
-                              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold text-[10px] px-2.5 py-1 rounded transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
-                              title="Anexar boleto PDF na movimentação da fatura no Bom Controle"
+                              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white p-1.5 rounded transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                              title={attachingId === String(fetchedFatura.Id) ? "Anexando PDF no Bom Controle..." : "Anexar PDF no BC - Upload de boleto no Bom Controle"}
                             >
-                              <Paperclip className={`h-3 w-3 ${attachingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
-                              {attachingId === String(fetchedFatura.Id) ? 'Anexando...' : 'Anexar PDF no BC'}
+                              <Paperclip className={`h-3.5 w-3.5 ${attachingId === String(fetchedFatura.Id) ? 'animate-spin' : ''}`} />
                             </button>
                           )}
 
